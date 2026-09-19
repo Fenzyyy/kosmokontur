@@ -11,7 +11,7 @@
 <nav class="tabs"><button class="tab active" data-view="plan">Plan</button><button class="tab" data-view="dashboard">Dashboard</button><button class="tab" data-view="frontier">Investment frontier</button><button class="tab" data-view="advanced">Advanced / JSON</button></nav>
 <main>
 <section id="view-plan" class="view active">
-<div class="section-title"><div><span class="eyebrow">01 · DECISION</span><h2>План оператора</h2></div><div class="actions"><button id="loadTemplate">Сбросить</button><button id="optimizeBtn" class="primary">Запустить оптимизацию</button></div></div>
+<div class="section-title"><div><span class="eyebrow">01 · DECISION</span><h2>План оператора</h2></div><div class="actions"><button id="savePlan">Сохранить план</button><button id="openPlan">Открыть план</button><button id="exportCsv">Экспорт CSV</button><button id="loadTemplate">Сбросить</button><button id="optimizeBtn" class="primary">Запустить оптимизацию</button><input id="openPlanInput" type="file" accept=".json,application/json" hidden></div></div>
 <div id="planMessage" class="message"></div>
 <section class="card"><div class="card-head"><div><h3>Годовые поставки</h3><span>Объём заказа по каждому каналу, т.</span></div><span id="yearRange" class="pill">—</span></div><div id="ordersEditor" class="table-scroll"></div></section>
 <div class="two-col">
