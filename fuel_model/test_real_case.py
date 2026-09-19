@@ -138,8 +138,8 @@ class RealCaseInputTests(unittest.TestCase):
             print(
                 f"{scenario_id}: "
                 f"cost={scenario_result.kpis['total_cost']:.3f}, "
-                f"service={scenario_result.kpis['service_level_total']:.6f}, "
-                f"critical_service={scenario_result.kpis['service_level_critical']:.6f}"
+                f"min_sl_total={scenario_result.kpis['min_sl_total']:.6f}, "
+                f"min_sl_critical={scenario_result.kpis['min_sl_critical']:.6f}"
             )
 
 
