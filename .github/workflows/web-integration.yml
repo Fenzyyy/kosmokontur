@@ -30,6 +30,35 @@ jobs:
       - name: Verify frontend JavaScript syntax
         run: node --check frontend/app.js
 
+      - name: Docker build and health smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -t kosmokontur-web .
+          docker run -d --rm --name kosmokontur-web -p 18000:8000 kosmokontur-web
+          trap 'docker stop kosmokontur-web >/dev/null 2>&1 || true' EXIT
+          python - <<'PY'
+          import json
+          import time
+          import urllib.request
+
+          url = "http://127.0.0.1:18000/api/health"
+          last_error = None
+          for _ in range(30):
+              try:
+                  with urllib.request.urlopen(url, timeout=2) as response:
+                      payload = json.load(response)
+                  assert payload["ok"] is True
+                  assert payload["engine"] == "fuel_model"
+                  print("Docker health OK:", payload["engine_version"])
+                  break
+              except Exception as exc:
+                  last_error = exc
+                  time.sleep(1)
+          else:
+              raise SystemExit(f"Container health check failed: {last_error}")
+          PY
+
       - name: Verify frontend has no external runtime URLs
         shell: python
         run: |
