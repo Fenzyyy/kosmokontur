@@ -1,0 +1,10 @@
+{
+  "plan_id": "example-empty-plan",
+  "scenario_id": "BASE",
+  "decisions": {
+    "supply_orders": [],
+    "capacity_reservations": [],
+    "investments": [],
+    "inventory_policy": {}
+  }
+}

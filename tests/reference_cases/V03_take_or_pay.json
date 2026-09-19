@@ -1,0 +1,15 @@
+{
+  "case_id": "V03",
+  "source": "SpaceEconomyPolicy/test_oil:validation/control_cases.md",
+  "description": "Минимум take-or-pay",
+  "inputs": {
+    "reserved_capacity_period_t": 100,
+    "order_t": 50,
+    "take_or_pay_share": 0.7,
+    "price_mln_per_t": 2
+  },
+  "expected": {
+    "payable_volume_t": 70,
+    "variable_payment_mln": 140
+  }
+}

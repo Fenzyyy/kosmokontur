@@ -27,6 +27,9 @@ jobs:
       - name: Run web integration tests
         run: PYTHONPATH=. pytest -q tests/test_web_api.py
 
+      - name: Run organizer reference-vector tests
+        run: PYTHONPATH=. pytest -q tests/test_reference_cases.py
+
       - name: Verify frontend JavaScript syntax
         run: node --check frontend/app.js
 

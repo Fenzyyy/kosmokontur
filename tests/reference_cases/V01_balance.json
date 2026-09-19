@@ -1,0 +1,14 @@
+{
+  "case_id": "V01",
+  "source": "SpaceEconomyPolicy/test_oil:validation/control_cases.md",
+  "description": "Материальный баланс",
+  "inputs": {
+    "opening_inventory_t": 10,
+    "delivered_t": 30,
+    "losses_t": 2,
+    "served_t": 25
+  },
+  "expected": {
+    "closing_inventory_t": 13
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "case_id": "V04",
+  "source": "SpaceEconomyPolicy/test_oil:validation/control_cases.md",
+  "description": "Take-or-pay не начисляется дважды",
+  "inputs": {
+    "reserved_capacity_period_t": 100,
+    "order_t": 50,
+    "take_or_pay_share": 0.7,
+    "price_mln_per_t": 2
+  },
+  "expected": {
+    "variable_payment_mln": 140,
+    "double_counted_payment_mln": 280
+  }
+}

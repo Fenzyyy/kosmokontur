@@ -1,0 +1,14 @@
+{
+  "case_id": "V10",
+  "source": "SpaceEconomyPolicy/test_oil:validation/control_cases.md",
+  "description": "Stress delivery не умножается повторно на reliability",
+  "inputs": {
+    "planned_delivery_t": 20,
+    "actual_delivery_share": 0.5,
+    "risk_metadata_reliability": 0.8
+  },
+  "expected": {
+    "actual_delivery_t": 10,
+    "incorrect_double_reliability_t": 8
+  }
+}
