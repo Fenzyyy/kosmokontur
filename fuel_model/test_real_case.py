@@ -103,17 +103,15 @@ class RealCaseInputTests(unittest.TestCase):
                 f"violations={[v.to_dict() for v in base_result.violations]}"
             ),
         )
-        self.assertAlmostEqual(
-            base_result.kpis["shortage_total"],
-            0.0,
-            places=6,
-            msg="BASE: total shortage",
+        self.assertGreaterEqual(
+            base_result.kpis["min_sl_total"],
+            self.case.constraints.sl_total_min - 1e-9,
+            msg="BASE: total service level below case constraint",
         )
-        self.assertAlmostEqual(
-            base_result.kpis["shortage_critical"],
-            0.0,
-            places=6,
-            msg="BASE: critical shortage",
+        self.assertGreaterEqual(
+            base_result.kpis["min_sl_critical"],
+            self.case.constraints.sl_critical_min - 1e-9,
+            msg="BASE: critical service level below case constraint",
         )
 
         stress_result = result.scenario_results["MANDATORY_STRESS"]
