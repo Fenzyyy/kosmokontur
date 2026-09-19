@@ -43,6 +43,32 @@ class OptimizerConfig:
 
 
 @dataclass
+class CandidateSummary:
+    """Компактный паспорт инвестиционного кандидата."""
+
+    investments: Tuple[str, ...]
+    status: str
+    reason: str = ""
+    capex_total: float = 0.0
+    capex_through_deadline: float = 0.0
+    score: Optional[Tuple[float, ...]] = None
+    scenario_metrics: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    selected: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "investments": list(self.investments),
+            "status": self.status,
+            "reason": self.reason,
+            "capex_total": self.capex_total,
+            "capex_through_deadline": self.capex_through_deadline,
+            "score": list(self.score) if self.score is not None else None,
+            "scenario_metrics": self.scenario_metrics,
+            "selected": self.selected,
+        }
+
+
+@dataclass
 class OptimizationResult:
     """Результат поиска лучшего по данной эвристике плана."""
 
@@ -52,6 +78,7 @@ class OptimizationResult:
     candidates_checked: int = 0
     iterations: int = 0
     notes: List[str] = field(default_factory=list)
+    candidate_summaries: List[CandidateSummary] = field(default_factory=list)
 
     @property
     def feasible(self) -> bool:
@@ -127,6 +154,44 @@ def _investment_subsets(
         for option_id in ids:
             yield (option_id,)
         yield ids
+
+
+def _investment_capex(case: Case, option_ids: Sequence[str]) -> Tuple[float, float]:
+    """Вернуть суммарный CAPEX и CAPEX до контрольного года для набора инвестиций."""
+    total = 0.0
+    through_deadline = 0.0
+    deadline = case.constraints.capex_cumulative_year
+
+    for option_id in option_ids:
+        option = case.options[option_id]
+        total += option.total_capex
+        decision = _investment_decision(case, option_id)
+        if decision is None:
+            continue
+        for stage_date, amount in zip(decision.stage_dates, option.stage_amounts):
+            if stage_date[0] <= deadline:
+                through_deadline += amount
+
+    return total, through_deadline
+
+
+def _candidate_metrics(results: Mapping[str, Result]) -> Dict[str, Dict[str, float]]:
+    """Собрать KPI по сценариям в сериализуемую структуру."""
+    return {
+        scenario_id: {
+            "total_cost": float(result.kpis["total_cost"]),
+            "pv_cost": float(result.kpis["pv_cost"]),
+            "capex_total": float(result.kpis["capex_total"]),
+            "capex_through_deadline": float(result.kpis["capex_through_deadline"]),
+            "shortage_total": float(result.kpis["shortage_total"]),
+            "shortage_critical": float(result.kpis["shortage_critical"]),
+            "min_sl_total": float(result.kpis["min_sl_total"]),
+            "min_sl_critical": float(result.kpis["min_sl_critical"]),
+            "hard_violations": float(result.kpis["hard_violations"]),
+            "benchmark_misses": float(result.kpis["benchmark_misses"]),
+        }
+        for scenario_id, result in results.items()
+    }
 
 
 def _with_investments(
@@ -1410,11 +1475,23 @@ def optimize(
     candidates_checked = 0
     total_iterations = 0
     notes: List[str] = []
+    candidate_summaries: List[CandidateSummary] = []
 
     for option_ids in _investment_subsets(case, config):
+        capex_total, capex_through_deadline = _investment_capex(case, option_ids)
+
         if not _investment_subset_can_meet_loss_ceilings(
             case, option_ids, scenario_list
         ):
+            candidate_summaries.append(
+                CandidateSummary(
+                    investments=tuple(option_ids),
+                    status="rejected",
+                    reason="storage loss ceiling заведомо недостижим.",
+                    capex_total=capex_total,
+                    capex_through_deadline=capex_through_deadline,
+                )
+            )
             notes.append(
                 f"Кандидат с инвестициями {option_ids} отклонён: "
                 "storage loss ceiling заведомо недостижим."
@@ -1423,6 +1500,15 @@ def optimize(
 
         seed = _with_investments(base_plan, case, option_ids)
         if seed is None:
+            candidate_summaries.append(
+                CandidateSummary(
+                    investments=tuple(option_ids),
+                    status="rejected",
+                    reason="инвестиционный график не удалось построить.",
+                    capex_total=capex_total,
+                    capex_through_deadline=capex_through_deadline,
+                )
+            )
             continue
 
         if initial_plan is None:
@@ -1439,8 +1525,19 @@ def optimize(
         candidates_checked += 1
         total_iterations += iterations
 
-        # Физически некорректный storage-кандидат не попадает в итоговый набор.
+        summary = CandidateSummary(
+            investments=tuple(option_ids),
+            status="evaluated",
+            capex_total=capex_total,
+            capex_through_deadline=capex_through_deadline,
+            score=score,
+            scenario_metrics=_candidate_metrics(results),
+        )
+
         if not _storage_is_feasible(results):
+            summary.status = "rejected"
+            summary.reason = "осталось переполнение storage."
+            candidate_summaries.append(summary)
             notes.append(
                 f"Кандидат с инвестициями {option_ids} отклонён: "
                 "осталось переполнение storage."
@@ -1459,6 +1556,12 @@ def optimize(
                         reserve_gaps.append(
                             f"{scenario_id}:{row['year']} gap={gap:.2f}t"
                         )
+            summary.status = "rejected"
+            summary.reason = (
+                "не выполнен 45-дневный резерв"
+                + (f": {', '.join(reserve_gaps[:8])}" if reserve_gaps else "")
+            )
+            candidate_summaries.append(summary)
             notes.append(
                 f"Кандидат с инвестициями {option_ids} отклонён: "
                 "не выполнен 45-дневный физический резерв "
@@ -1472,12 +1575,19 @@ def optimize(
             best_results = results
             best_score = score
 
+        candidate_summaries.append(summary)
+
     if best_plan is None or best_results is None or best_score is None:
         diagnostic = " | ".join(notes[-12:]) if notes else "нет диагностических сообщений"
         raise RuntimeError(
             "Оптимизатор не смог построить ни одного кандидата. "
             f"Диагностика: {diagnostic}"
         )
+
+    selected_investments = tuple(sorted(best_plan.investments))
+    for summary in candidate_summaries:
+        if summary.status == "evaluated" and summary.investments == selected_investments:
+            summary.selected = True
 
     if all(r.feasible for r in best_results.values()):
         notes.append("Найден план без HARD-нарушений.")
@@ -1493,27 +1603,5 @@ def optimize(
         candidates_checked=candidates_checked,
         iterations=total_iterations,
         notes=notes,
+        candidate_summaries=candidate_summaries,
     )
-
-
-def optimize_one(
-    case: Case,
-    scenario: Scenario,
-    initial_plan: Optional[Plan] = None,
-    config: Optional[OptimizerConfig] = None,
-) -> OptimizationResult:
-    """Удобная обёртка для одного сценария."""
-    return optimize(
-        case,
-        [scenario],
-        initial_plan=initial_plan,
-        config=config,
-    )
-
-
-__all__ = [
-    "OptimizerConfig",
-    "OptimizationResult",
-    "optimize",
-    "optimize_one",
-]
