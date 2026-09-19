@@ -25,7 +25,7 @@ jobs:
           pip install pytest httpx
 
       - name: Run web integration tests
-        run: pytest -q tests/test_web_api.py
+        run: PYTHONPATH=. pytest -q tests/test_web_api.py
 
       - name: Verify frontend has no external runtime URLs
         shell: python
