@@ -861,9 +861,21 @@ def optimize(
             continue
 
         if not _reserve_is_feasible(results):
+            reserve_gaps = []
+            for scenario_id, scenario_result in results.items():
+                for row in scenario_result.yearly:
+                    gap = max(
+                        0.0,
+                        row["reserve_required"] - row["reserve_stock_at_check"],
+                    )
+                    if gap > 1e-8:
+                        reserve_gaps.append(
+                            f"{scenario_id}:{row['year']} gap={gap:.2f}t"
+                        )
             notes.append(
                 f"Кандидат с инвестициями {option_ids} отклонён: "
-                "не выполнен 45-дневный физический резерв."
+                "не выполнен 45-дневный физический резерв "
+                f"({', '.join(reserve_gaps[:8])})."
             )
             continue
 
