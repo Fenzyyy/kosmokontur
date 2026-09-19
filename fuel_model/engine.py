@@ -112,6 +112,22 @@ def _physics(case: Case, plan: Plan, scenario: Scenario, res: Resolved) -> dict:
         short_c = max(0.0, crit - served_c)
         short_t = 0.0 if short_t < 1e-9 else short_t
         short_c = 0.0 if short_c < 1e-9 else short_c
+        reserve_required = F.reserve_requirement(
+            total, case.constraints.reserve_days
+        )
+        reserve_contract = 0.0
+        emergency_id = case.constraints.emergency_source_id
+        if emergency_id in case.sources:
+            emergency = case.sources[emergency_id]
+            emergency_frac = cal.fraction_available(
+                y, res.avail_day[emergency_id]
+            )
+            if emergency_frac > 0:
+                reserve_contract = min(
+                    plan.reserved_capacity(emergency, y),
+                    emergency.capacity * emergency_frac,
+                )
+
         yearly.append({
             "year": y, "demand_total": total, "demand_critical": crit, "demand_other": other,
             "served_total": served_t, "served_critical": served_c, "served_other": served_t - served_c,
@@ -120,8 +136,10 @@ def _physics(case: Case, plan: Plan, scenario: Scenario, res: Resolved) -> dict:
             "inventory_open": inv_open, "gross_inflow": gross, "losses": losses,
             "loss_share": (losses / gross) if gross > 0 else 0.0,
             "inventory_close": inv, "inventory_peak": inv_peak, "storage_capacity_end": cap_end,
-            "reserve_required": F.reserve_requirement(total, case.constraints.reserve_days),
+            "reserve_required": reserve_required,
             "reserve_stock_at_check": reserve_stock,
+            "reserve_emergency_equivalent": reserve_contract,
+            "reserve_covered": reserve_stock + reserve_contract,
             "balance_residual": F.closing_inventory(inv_open, gross, losses, served_t) - inv,
             "sources": {sid: src_year[(sid, y)] for sid in case.sources},
         })
