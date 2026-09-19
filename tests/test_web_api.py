@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from backend.api import app
+from backend.api import app, case
+from fuel_model.investments import build_investment_decision, decision_to_dict
+from fuel_model.optimizer import optimize
+from fuel_model.model import Plan
+from fuel_model.scenarios import get
 
 
 client = TestClient(app)
@@ -70,3 +74,22 @@ def test_optimize_round_trip_base_and_stress():
 
     selected = [p for p in data["frontier"] if p.get("selected")]
     assert len(selected) <= 1
+
+
+def test_investment_schedule_is_shared_by_api_and_optimizer():
+    c = case()
+    defaults = client.get("/api/defaults").json()
+    api_investments = {item["id"]: item for item in defaults["investments"]}
+
+    for option_id in c.options:
+        expected = build_investment_decision(c, option_id)
+        expected_payload = decision_to_dict(expected) if expected is not None else None
+        assert api_investments[option_id]["default_schedule"] == expected_payload
+
+    result = optimize(
+        c,
+        [get("BASE")],
+        initial_plan=Plan.from_dict(defaults["plan_template"]),
+    )
+    for option_id, decision in result.plan.investments.items():
+        assert decision_to_dict(decision) == api_investments[option_id]["default_schedule"]
