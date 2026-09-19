@@ -17,4 +17,4 @@ class CalculateRequest(BaseModel):
 
 class FrontierRequest(BaseModel):
     plan: dict[str, Any] = Field(default_factory=dict)
-    scenario_ids: list[str] = Field(default_factory=lambda: ["BASE", "MANDATORY_STRESS"])
+    scenario_ids: list[str] = Field(default_factory=lambda: ["BASE", "MANDATORY_STRESS"], min_length=1)
