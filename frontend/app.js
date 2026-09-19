@@ -1,6 +1,6 @@
 const API=window.ENGINE_API_URL||"";
 const $=id=>document.getElementById(id);
-let defaults=null,plan=null,lastResult=null,currentScenario="BASE",frontierChart=null,inventoryChart=null,capexChart=null;
+let defaults=null,plan=null,lastResult=null,currentScenario="BASE";
 async function api(path,opt={}){const r=await fetch(API+path,opt);const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.detail||"HTTP "+r.status);return b}
 function msg(id,t,c){$(id).textContent=t||"";$(id).className="message "+(c||"")}
 function fmt(x,d=1){return x==null||Number.isNaN(Number(x))?"—":Number(x).toLocaleString("ru-RU",{maximumFractionDigits:d})}
@@ -17,7 +17,32 @@ function editors(){$("yearRange").textContent=defaults.years[0]+"—"+defaults.y
 function loadPlan(p){plan=clone(p);editors()}
 async function optimize(){msg("planMessage","Оптимизатор выполняется…");$("optimizeBtn").disabled=true;try{sync();let ids=["BASE"];if($("stressScenario").checked)ids.push("MANDATORY_STRESS");lastResult=await api("/api/optimize",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({plan:plan,scenario_ids:ids,run_frontier:true})});plan=clone(lastResult.plan);editors();$("resultJson").textContent=JSON.stringify(lastResult,null,2);renderDashboard();renderFrontier();msg("planMessage",lastResult.feasible?"План найден без HARD-нарушений":"Найден лучший доступный план; проверьте dashboard",lastResult.feasible?"good":"");view("dashboard")}catch(e){msg("planMessage",e.message,"bad")}finally{$("optimizeBtn").disabled=false}}
 function renderDashboard(){let r=lastResult?.scenarios?.[currentScenario];if(!r){$("dashboardContent").innerHTML='<div class="dashboard-empty"><h3>Нет результата для сценария</h3></div>';return}let k=r.kpis||{},good=r.feasible;$("dashboardContent").innerHTML='<div class="result-status '+(good?"good":"bad")+'"><div><strong>'+(good?"Допустимый план":"Есть HARD-нарушения")+'</strong><p>'+(r.meta?.name||currentScenario)+'</p></div><span class="status '+(good?"ok":"bad")+'">'+(good?"FEASIBLE":"CHECK")+'</span></div><div class="kpis"><div class="kpi"><div class="label">PV COST</div><div class="value">'+fmt(k.pv_cost)+' млн</div></div><div class="kpi"><div class="label">CAPEX</div><div class="value">'+fmt(k.capex_total)+' млн</div></div><div class="kpi"><div class="label">SHORTAGE</div><div class="value">'+fmt(k.shortage_total)+' т</div></div><div class="kpi"><div class="label">MIN SL TOTAL</div><div class="value">'+fmt((k.min_sl_total||0)*100,2)+'%</div></div><div class="kpi"><div class="label">MIN SL CRITICAL</div><div class="value">'+fmt((k.min_sl_critical||0)*100,2)+'%</div></div></div><div class="charts"><div class="card"><div class="card-head"><div><h3>Запас топлива</h3><span>Запас и требуемый резерв.</span></div></div><div class="chart-box"><canvas id="inventoryChart"></canvas></div></div><div class="card"><div class="card-head"><div><h3>CAPEX</h3><span>Капитальные затраты по годам.</span></div></div><div class="chart-box"><canvas id="capexChart"></canvas></div></div></div><div class="two-col"><div class="card"><div class="card-head"><h3>Годовая физика</h3></div><div id="yearlyTable" class="table-scroll"></div></div><div class="card"><div class="card-head"><h3>Нарушения / проверки</h3></div><div id="violations"></div></div></div>';drawCharts(r);renderYearly(r);renderViolations(r)}
-function drawCharts(r){let y=r.yearly||[],labels=y.map(x=>x.year);if(inventoryChart)inventoryChart.destroy();if(capexChart)capexChart.destroy();inventoryChart=new Chart($("inventoryChart"),{type:"line",data:{labels:labels,datasets:[{label:"Запас, т",data:y.map(x=>x.inventory_close),tension:.25},{label:"Резерв, т",data:y.map(x=>x.reserve_required),tension:.25}]},options:{responsive:true,maintainAspectRatio:false}});let c=r.costs||[];capexChart=new Chart($("capexChart"),{type:"bar",data:{labels:c.map(x=>x.year),datasets:[{label:"CAPEX, млн у.е.",data:c.map(x=>x.capex)}]},options:{responsive:true,maintainAspectRatio:false}})}
+function chartSvg(el,series,kind){
+ const w=760,h=300,p={l:58,r:18,t:22,b:42},iw=w-p.l-p.r,ih=h-p.t-p.b;
+ const vals=series.flatMap(s=>s.data.map(Number).filter(Number.isFinite)),max=Math.max(...vals,1),min=Math.min(...vals,0);
+ const sx=i=>p.l+(series[0].data.length===1?iw/2:iw*i/(series[0].data.length-1));
+ const sy=v=>p.t+ih-(v-min)/(max-min||1)*ih;
+ const esc=s=>String(s).replaceAll("&","&amp;").replaceAll("<","&lt;");
+ let svg='<svg viewBox="0 0 '+w+' '+h+'" role="img" aria-label="chart">';
+ [0,.5,1].forEach(t=>{let y=p.t+ih*t;let v=max-(max-min)*t;svg+='<line x1="'+p.l+'" y1="'+y+'" x2="'+(w-p.r)+'" y2="'+y+'" class="grid"/><text x="'+(p.l-8)+'" y="'+(y+4)+'" text-anchor="end" class="axis">'+esc(fmt(v))+'</text>'});
+ const n=series[0].data.length;
+ if(n){[0,Math.floor((n-1)/2),n-1].filter((v,i,a)=>a.indexOf(v)===i).forEach(i=>{svg+='<text x="'+sx(i)+'" y="'+(h-14)+'" text-anchor="middle" class="axis">'+esc(series[0].labels[i])+'</text>'})}
+ series.forEach((s,si)=>{
+   if(kind==="bar"){let bw=Math.max(4,iw/Math.max(n,1)*.55);s.data.forEach((v,i)=>{let y=sy(Number(v));svg+='<rect x="'+(sx(i)-bw/2)+'" y="'+y+'" width="'+bw+'" height="'+(p.t+ih-y)+'" class="bar b'+si+'"/>'})}
+   else {let pts=s.data.map((v,i)=>sx(i)+","+sy(Number(v))).join(" ");svg+='<polyline points="'+pts+'" class="line l'+si+'" fill="none"/>';s.data.forEach((v,i)=>{svg+='<circle cx="'+sx(i)+'" cy="'+sy(Number(v))+'" r="3" class="dot d'+si+'"/>'})}
+ });
+ svg+='<line x1="'+p.l+'" y1="'+(p.t+ih)+'" x2="'+(w-p.r)+'" y2="'+(p.t+ih)+'" class="axis-line"/>';
+ svg+='</svg>';$(el).innerHTML=svg;
+}
+function drawCharts(r){
+ const y=r.yearly||[];
+ chartSvg("inventoryChart",[
+  {labels:y.map(x=>x.year),data:y.map(x=>x.inventory_close)},
+  {labels:y.map(x=>x.year),data:y.map(x=>x.reserve_required)}
+ ],"line");
+ const c=r.costs||[];
+ chartSvg("capexChart",[{labels:c.map(x=>x.year),data:c.map(x=>x.capex)}],"bar");
+}
 function renderYearly(r){let cols=["year","demand_total","served_total","shortage_total","inventory_close","reserve_required","reserve_covered"];$("yearlyTable").innerHTML="<table><thead><tr>"+cols.map(x=>"<th>"+x+"</th>").join("")+"</tr></thead><tbody>"+(r.yearly||[]).map(row=>"<tr>"+cols.map(x=>"<td>"+fmt(row[x])+"</td>").join("")+"</tr>").join("")+"</tbody></table>"}
 function renderViolations(r){let vs=r.violations||[];$("violations").innerHTML=vs.length?vs.map(v=>'<div class="violation"><strong>'+(v.severity||"CHECK")+" · "+(v.code||"")+'</strong><span>'+(v.message||v.detail||"")+(v.year?" · "+v.year:"")+"</span></div>").join(""):'<div class="message good">Нарушений не обнаружено.</div>'}
 document.querySelectorAll(".scenario-btn").forEach(b=>b.onclick=()=>{currentScenario=b.dataset.scenario;document.querySelectorAll(".scenario-btn").forEach(x=>x.classList.toggle("active",x===b));renderDashboard()});
