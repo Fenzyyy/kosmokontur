@@ -124,12 +124,21 @@ def check_results(case: Case, scenario: Scenario, yearly: List[dict], costs: Lis
                                  f"{y}: обслужено {r['sl_critical']:.1%} критического спроса ({sl_note} "
                                  f"{c.sl_critical_min:.0%}); дефицит {r['shortage_critical']:.2f} т", y, "critical",
                                  r["sl_critical"], c.sl_critical_min, c.sl_critical_min - r["sl_critical"]))
-        if r["reserve_stock_at_check"] < r["reserve_required"] - EPS:
-            out.append(Violation("RESERVE_45D_SHORT", SEVERITY_HARD,
-                                 f"{y}: физический запас на начало года {r['reserve_stock_at_check']:.2f} т < резерва "
-                                 f"{c.reserve_days:g} дней спроса {r['reserve_required']:.2f} т", y, "reserve",
-                                 r["reserve_stock_at_check"], r["reserve_required"],
-                                 r["reserve_required"] - r["reserve_stock_at_check"]))
+        reserve_covered = r.get(
+            "reserve_covered",
+            r["reserve_stock_at_check"],
+        )
+        if reserve_covered < r["reserve_required"] - EPS:
+            contract = r.get("reserve_emergency_equivalent", 0.0)
+            out.append(Violation(
+                "RESERVE_45D_SHORT", SEVERITY_HARD,
+                f"{y}: покрыто {reserve_covered:.2f} т = физический запас "
+                f"{r['reserve_stock_at_check']:.2f} т + Emergency reserve "
+                f"{contract:.2f} т < резерв {c.reserve_days:g} дней "
+                f"{r['reserve_required']:.2f} т",
+                y, "reserve", reserve_covered, r["reserve_required"],
+                r["reserve_required"] - reserve_covered,
+            ))
         ceiling = scenario.loss_ceiling.get(y)
         if ceiling is not None and r["gross_inflow"] > 0 and r["loss_share"] > ceiling + 1e-12:
             out.append(Violation("LOSS_CEILING_EXCEEDED", SEVERITY_HARD,
