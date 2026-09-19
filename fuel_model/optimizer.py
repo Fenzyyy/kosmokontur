@@ -421,6 +421,7 @@ def _repair_service_shortage(
     """
     current = copy.deepcopy(seed)
     iterations = 0
+    diagnostics: List[str] = []
     max_repairs = max(1, len(case.years) * len(case.sources) * 3)
 
     def year_shortage(results: Mapping[str, Result], year: int) -> float:
@@ -504,13 +505,20 @@ def _repair_service_shortage(
             ))
 
         if not candidates:
-            return current, results, score, iterations
+            diagnostics.append(
+                f"service repair stalled at {worst_year}; "
+                f"shortage={current_year_shortage:.2f}t"
+            )
+            break
 
         _, _, _, _, current, results, score = max(
             candidates,
             key=lambda item: (item[0], item[1], item[2], item[3]),
         )
         iterations += 1
+
+    if diagnostics:
+        current.notes = (current.notes + " " + " ".join(diagnostics)).strip()
 
     results, score = _evaluate_all(case, current, scenarios)
     return current, results, score, iterations
@@ -1168,7 +1176,8 @@ def optimize(
         ):
             notes.append(
                 f"Кандидат с инвестициями {option_ids} отклонён: "
-                "остался фактический дефицит поставок."
+                "остался фактический дефицит поставок. "
+                f"{candidate.notes or ''}"
             )
             continue
 
