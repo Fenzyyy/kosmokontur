@@ -1,0 +1,23 @@
+{
+  "_comments": "TEAM_ASSUMPTION: source lead-time semantics for the model. Earth-New is available after commissioning; Lunar-ISRU starts deliveries after commissioning lead time.",
+  "A": {
+    "requires_option": "",
+    "lead_time_semantics": "order"
+  },
+  "B": {
+    "requires_option": "",
+    "lead_time_semantics": "order"
+  },
+  "C": {
+    "requires_option": "EARTH_NEW",
+    "lead_time_semantics": "build"
+  },
+  "D": {
+    "requires_option": "LUNAR_ISRU",
+    "lead_time_semantics": "post_commissioning"
+  },
+  "E": {
+    "requires_option": "",
+    "lead_time_semantics": "order"
+  }
+}
