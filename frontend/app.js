@@ -34,6 +34,21 @@ function chartSvg(el,series,kind){
  svg+='<line x1="'+p.l+'" y1="'+(p.t+ih)+'" x2="'+(w-p.r)+'" y2="'+(p.t+ih)+'" class="axis-line"/>';
  svg+='</svg>';$(el).innerHTML=svg;
 }
+function chartSvg(el,series,kind){
+ const w=760,h=300,p={l:58,r:18,t:22,b:42},iw=w-p.l-p.r,ih=h-p.t-p.b;
+ const vals=series.flatMap(s=>s.data.map(Number).filter(Number.isFinite));
+ const max=Math.max(...vals,1),min=Math.min(...vals,0);
+ const sx=i=>p.l+(series[0].data.length===1?iw/2:iw*i/(series[0].data.length-1));
+ const sy=v=>p.t+ih-(v-min)/(max-min||1)*ih;
+ const esc=s=>String(s).replaceAll("&","&amp;").replaceAll("<","&lt;");
+ let svg='<svg viewBox="0 0 '+w+' '+h+'">';
+ [0,.5,1].forEach(t=>{const y=p.t+ih*t,v=max-(max-min)*t;svg+='<line x1="'+p.l+'" y1="'+y+'" x2="'+(w-p.r)+'" y2="'+y+'" class="grid"/><text x="'+(p.l-8)+'" y="'+(y+4)+'" text-anchor="end" class="axis">'+esc(fmt(v))+'</text>'});
+ const n=series[0].data.length;
+ if(n){[0,Math.floor((n-1)/2),n-1].filter((v,i,a)=>a.indexOf(v)===i).forEach(i=>svg+='<text x="'+sx(i)+'" y="'+(h-14)+'" text-anchor="middle" class="axis">'+esc(series[0].labels[i])+'</text>')}
+ series.forEach((s,si)=>{if(kind==="bar"){const bw=Math.max(4,iw/Math.max(n,1)*.55);s.data.forEach((v,i)=>{const y=sy(Number(v));svg+='<rect x="'+(sx(i)-bw/2)+'" y="'+y+'" width="'+bw+'" height="'+(p.t+ih-y)+'" class="bar b'+si+'"/>'})}else{const pts=s.data.map((v,i)=>sx(i)+","+sy(Number(v))).join(" ");svg+='<polyline points="'+pts+'" class="line l'+si+'" fill="none"/>';s.data.forEach((v,i)=>svg+='<circle cx="'+sx(i)+'" cy="'+sy(Number(v))+'" r="3" class="dot d'+si+'"/>')}});
+ svg+='<line x1="'+p.l+'" y1="'+(p.t+ih)+'" x2="'+(w-p.r)+'" y2="'+(p.t+ih)+'" class="axis-line"/></svg>';
+ $(el).innerHTML=svg;
+}
 function drawCharts(r){
  const y=r.yearly||[];
  chartSvg("inventoryChart",[
@@ -46,7 +61,17 @@ function drawCharts(r){
 function renderYearly(r){let cols=["year","demand_total","served_total","shortage_total","inventory_close","reserve_required","reserve_covered"];$("yearlyTable").innerHTML="<table><thead><tr>"+cols.map(x=>"<th>"+x+"</th>").join("")+"</tr></thead><tbody>"+(r.yearly||[]).map(row=>"<tr>"+cols.map(x=>"<td>"+fmt(row[x])+"</td>").join("")+"</tr>").join("")+"</tbody></table>"}
 function renderViolations(r){let vs=r.violations||[];$("violations").innerHTML=vs.length?vs.map(v=>'<div class="violation"><strong>'+(v.severity||"CHECK")+" · "+(v.code||"")+'</strong><span>'+(v.message||v.detail||"")+(v.year?" · "+v.year:"")+"</span></div>").join(""):'<div class="message good">Нарушений не обнаружено.</div>'}
 document.querySelectorAll(".scenario-btn").forEach(b=>b.onclick=()=>{currentScenario=b.dataset.scenario;document.querySelectorAll(".scenario-btn").forEach(x=>x.classList.toggle("active",x===b));renderDashboard()});
-function renderFrontier(){let pts=lastResult?.frontier||[],valid=pts.filter(p=>p.status==="evaluated"&&p.capex_total!=null&&p.service_level_base!=null);if(frontierChart)frontierChart.destroy();frontierChart=new Chart($("frontierChart"),{type:"scatter",data:{datasets:[{label:"Investment candidates",data:valid.map(p=>({x:p.capex_total,y:p.service_level_base*100})),pointRadius:6}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{title:{display:true,text:"CAPEX, млн у.е."}},y:{title:{display:true,text:"MIN SL BASE, %"}}}}});$("frontierTable").innerHTML=pts.length?"<table><thead><tr><th>Инвестиции</th><th>CAPEX</th><th>SL BASE</th><th>SL STRESS</th><th>Shortage</th><th>Status</th></tr></thead><tbody>"+pts.map(p=>"<tr><td>"+(p.selected?"★ ":"")+(p.investments||[]).join(", ")+"</td><td>"+fmt(p.capex_total,0)+"</td><td>"+fmt((p.service_level_base||0)*100,2)+"%</td><td>"+fmt((p.service_level_stress||0)*100,2)+"%</td><td>"+fmt((p.shortage_base||0)+(p.shortage_stress||0))+"</td><td>"+p.status+"</td></tr>").join("")+"</tbody></table>":"<div class=\"message\">Запустите оптимизацию, чтобы получить frontier.</div>"}
+function renderFrontier(){
+ const pts=lastResult?.frontier||[],valid=pts.filter(p=>p.status==="evaluated"&&p.capex_total!=null&&p.service_level_base!=null);
+ const el=$("frontierChart"),w=760,h=320,p={l:62,r:22,t:22,b:48};
+ const xs=valid.map(q=>Number(q.capex_total)),ys=valid.map(q=>Number(q.service_level_base)*100);
+ const xmax=Math.max(...xs,1),xmin=Math.min(...xs,0),ymin=Math.min(...ys,0),ymax=Math.max(...ys,100);
+ const sx=v=>p.l+(v-xmin)/(xmax-xmin||1)*(w-p.l-p.r),sy=v=>p.t+(ymax-v)/(ymax-ymin||1)*(h-p.t-p.b);
+ let svg='<svg viewBox="0 0 '+w+' '+h+'"><line x1="'+p.l+'" y1="'+(h-p.b)+'" x2="'+(w-p.r)+'" y2="'+(h-p.b)+'" class="axis-line"/><line x1="'+p.l+'" y1="'+p.t+'" x2="'+p.l+'" y2="'+(h-p.b)+'" class="axis-line"/><text x="'+(w/2)+'" y="'+(h-8)+'" text-anchor="middle" class="axis">CAPEX, млн у.е.</text><text transform="translate(15 '+(h/2)+') rotate(-90)" text-anchor="middle" class="axis">MIN SL BASE, %</text>';
+ valid.forEach(q=>{svg+='<circle cx="'+sx(Number(q.capex_total))+'" cy="'+sy(Number(q.service_level_base)*100)+'" r="'+(q.selected?8:6)+'" class="frontier-point'+(q.selected?" selected":"")+'"><title>'+String(q.investments||[]).replaceAll("&","&amp;")+'</title></circle>'});
+ svg+='</svg>';el.innerHTML=svg;
+ $("frontierTable").innerHTML=pts.length?"<table><thead><tr><th>Инвестиции</th><th>CAPEX</th><th>SL BASE</th><th>SL STRESS</th><th>Shortage</th><th>Status</th></tr></thead><tbody>"+pts.map(p=>"<tr><td>"+(p.selected?"★ ":"")+(p.investments||[]).join(", ")+"</td><td>"+fmt(p.capex_total,0)+"</td><td>"+fmt((p.service_level_base||0)*100,2)+"%</td><td>"+fmt((p.service_level_stress||0)*100,2)+"%</td><td>"+fmt((p.shortage_base||0)+(p.shortage_stress||0))+"</td><td>"+p.status+"</td></tr>").join("")+"</tbody></table>":"<div class="message">Запустите оптимизацию, чтобы получить frontier.</div>";
+}
 $("loadTemplate").onclick=()=>loadPlan(defaults.plan_template);$("optimizeBtn").onclick=optimize;
 $("formatJson").onclick=()=>{try{$("planJson").value=JSON.stringify(JSON.parse($("planJson").value),null,2);msg("planMessage","JSON корректен","good")}catch(e){msg("planMessage","Ошибка JSON: "+e.message,"bad")}};
 $("applyJson").onclick=()=>{try{loadPlan(JSON.parse($("planJson").value));msg("planMessage","JSON применён","good");view("plan")}catch(e){msg("planMessage","Ошибка JSON: "+e.message,"bad")}};
