@@ -128,3 +128,24 @@ def test_frontend_assets_are_served_by_fastapi():
     styles = client.get("/styles.css")
     assert app_js.status_code == 200
     assert styles.status_code == 200
+
+
+def test_fixed_investment_still_allows_optimizer_to_build_supply_plan():
+    defaults = client.get("/api/defaults").json()
+    plan = Plan.from_dict(defaults["plan_template"])
+    plan.investments = {"EARTH_NEW": build_investment_decision(case(), "EARTH_NEW")}
+
+    result = optimize(case(), [get("BASE")], initial_plan=plan)
+
+    total_order = sum(
+        float(value)
+        for by_year in result.plan.orders.values()
+        for value in by_year.values()
+    )
+    assert total_order > 0.0
+
+
+def test_free_capacity_source_ignores_explicit_zero_reserve():
+    c = case()
+    plan = Plan("reserve-test", reserved={"D": {2035: 0.0}})
+    assert plan.reserved_capacity(c.sources["D"], 2035) == c.sources["D"].capacity
