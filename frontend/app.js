@@ -3,7 +3,8 @@ const $=id=>document.getElementById(id);
 let defaults=null,plan=null,lastResult=null,currentScenario="BASE";
 async function api(path,opt={}){const r=await fetch(API+path,opt);const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.detail||"HTTP "+r.status);return b}
 function msg(id,t,c){$(id).textContent=t||"";$(id).className="message "+(c||"")}
-function fmt(x,d=1){return x==null||Number.isNaN(Number(x))?"—":Number(x).toLocaleString("ru-RU",{maximumFractionDigits:d})}\nfunction pct(x,d=2){return fmt(x==null?null:Number(x)*100,d)}
+function fmt(x,d=1){return x==null||Number.isNaN(Number(x))?"—":Number(x).toLocaleString("ru-RU",{maximumFractionDigits:d})}
+function pct(x,d=2){return fmt(x==null?null:Number(x)*100,d)}
 function clone(x){return JSON.parse(JSON.stringify(x))}
 function view(v){document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.view===v));document.querySelectorAll(".view").forEach(x=>x.classList.toggle("active",x.id==="view-"+v))}
 document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>view(b.dataset.view));
