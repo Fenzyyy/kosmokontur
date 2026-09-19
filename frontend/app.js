@@ -19,23 +19,6 @@ async function optimize(){msg("planMessage","Оптимизатор выполн
 function renderDashboard(){let r=lastResult?.scenarios?.[currentScenario];if(!r){$("dashboardContent").innerHTML='<div class="dashboard-empty"><h3>Нет результата для сценария</h3></div>';return}let k=r.kpis||{},good=r.feasible;$("dashboardContent").innerHTML='<div class="result-status '+(good?"good":"bad")+'"><div><strong>'+(good?"Допустимый план":"Есть HARD-нарушения")+'</strong><p>'+(r.meta?.name||currentScenario)+'</p></div><span class="status '+(good?"ok":"bad")+'">'+(good?"FEASIBLE":"CHECK")+'</span></div><div class="kpis"><div class="kpi"><div class="label">PV COST</div><div class="value">'+fmt(k.pv_cost)+' млн</div></div><div class="kpi"><div class="label">CAPEX</div><div class="value">'+fmt(k.capex_total)+' млн</div></div><div class="kpi"><div class="label">SHORTAGE</div><div class="value">'+fmt(k.shortage_total)+' т</div></div><div class="kpi"><div class="label">MIN SL TOTAL</div><div class="value">'+fmt((k.min_sl_total||0)*100,2)+'%</div></div><div class="kpi"><div class="label">MIN SL CRITICAL</div><div class="value">'+fmt((k.min_sl_critical||0)*100,2)+'%</div></div></div><div class="charts"><div class="card"><div class="card-head"><div><h3>Запас топлива</h3><span>Запас и требуемый резерв.</span></div></div><div class="chart-box"><div id="inventoryChart" class="svg-chart"></div></div></div><div class="card"><div class="card-head"><div><h3>CAPEX</h3><span>Капитальные затраты по годам.</span></div></div><div class="chart-box"><div id="capexChart" class="svg-chart"></div></div></div></div><div class="two-col"><div class="card"><div class="card-head"><h3>Годовая физика</h3></div><div id="yearlyTable" class="table-scroll"></div></div><div class="card"><div class="card-head"><h3>Нарушения / проверки</h3></div><div id="violations"></div></div></div>';drawCharts(r);renderYearly(r);renderViolations(r)}
 function chartSvg(el,series,kind){
  const w=760,h=300,p={l:58,r:18,t:22,b:42},iw=w-p.l-p.r,ih=h-p.t-p.b;
- const vals=series.flatMap(s=>s.data.map(Number).filter(Number.isFinite)),max=Math.max(...vals,1),min=Math.min(...vals,0);
- const sx=i=>p.l+(series[0].data.length===1?iw/2:iw*i/(series[0].data.length-1));
- const sy=v=>p.t+ih-(v-min)/(max-min||1)*ih;
- const esc=s=>String(s).replaceAll("&","&amp;").replaceAll("<","&lt;");
- let svg='<svg viewBox="0 0 '+w+' '+h+'" role="img" aria-label="chart">';
- [0,.5,1].forEach(t=>{let y=p.t+ih*t;let v=max-(max-min)*t;svg+='<line x1="'+p.l+'" y1="'+y+'" x2="'+(w-p.r)+'" y2="'+y+'" class="grid"/><text x="'+(p.l-8)+'" y="'+(y+4)+'" text-anchor="end" class="axis">'+esc(fmt(v))+'</text>'});
- const n=series[0].data.length;
- if(n){[0,Math.floor((n-1)/2),n-1].filter((v,i,a)=>a.indexOf(v)===i).forEach(i=>{svg+='<text x="'+sx(i)+'" y="'+(h-14)+'" text-anchor="middle" class="axis">'+esc(series[0].labels[i])+'</text>'})}
- series.forEach((s,si)=>{
-   if(kind==="bar"){let bw=Math.max(4,iw/Math.max(n,1)*.55);s.data.forEach((v,i)=>{let y=sy(Number(v));svg+='<rect x="'+(sx(i)-bw/2)+'" y="'+y+'" width="'+bw+'" height="'+(p.t+ih-y)+'" class="bar b'+si+'"/>'})}
-   else {let pts=s.data.map((v,i)=>sx(i)+","+sy(Number(v))).join(" ");svg+='<polyline points="'+pts+'" class="line l'+si+'" fill="none"/>';s.data.forEach((v,i)=>{svg+='<circle cx="'+sx(i)+'" cy="'+sy(Number(v))+'" r="3" class="dot d'+si+'"/>'})}
- });
- svg+='<line x1="'+p.l+'" y1="'+(p.t+ih)+'" x2="'+(w-p.r)+'" y2="'+(p.t+ih)+'" class="axis-line"/>';
- svg+='</svg>';$(el).innerHTML=svg;
-}
-function chartSvg(el,series,kind){
- const w=760,h=300,p={l:58,r:18,t:22,b:42},iw=w-p.l-p.r,ih=h-p.t-p.b;
  const vals=series.flatMap(s=>s.data.map(Number).filter(Number.isFinite));
  const max=Math.max(...vals,1),min=Math.min(...vals,0);
  const sx=i=>p.l+(series[0].data.length===1?iw/2:iw*i/(series[0].data.length-1));
