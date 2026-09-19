@@ -407,6 +407,100 @@ def _reserve_is_feasible(results: Mapping[str, Result]) -> bool:
     )
 
 
+def _free_storage_before_year(
+    case: Case,
+    plan: Plan,
+    scenarios: Sequence[Scenario],
+    year: int,
+) -> Tuple[Plan, bool]:
+    """Уменьшить избыточные поставки прошлого года, если это не ухудшает
+    уже достигнутую обеспеченность и резерв.
+    """
+    if year <= case.first_year:
+        return plan, False
+
+    prev_year = year - 1
+    base_results, _ = _evaluate_all(case, plan, scenarios)
+    base_shortage = sum(
+        result.kpis["shortage_total"] for result in base_results.values()
+    )
+
+    candidates = []
+    for sid, source in case.sources.items():
+        current_order = plan.order(sid, prev_year)
+        if current_order <= 1e-9:
+            continue
+
+        trial = copy.deepcopy(plan)
+        _set_order(case, trial, sid, prev_year, 0.0)
+        trial_results, _ = _evaluate_all(case, trial, scenarios)
+
+        trial_shortage = sum(
+            result.kpis["shortage_total"]
+            for result in trial_results.values()
+        )
+        if (
+            trial_shortage <= base_shortage + 1e-8
+            and _reserve_is_feasible(trial_results)
+            and _storage_is_feasible(trial_results)
+        ):
+            candidates.append((
+                current_order,
+                sid,
+                trial,
+                trial_results,
+            ))
+            continue
+
+        # Ищем минимально необходимый остаточный заказ прошлого года.
+        lo = 0.0
+        hi = current_order
+        best_trial = None
+        best_results = None
+
+        for _ in range(10):
+            mid = (lo + hi) / 2.0
+            candidate = copy.deepcopy(plan)
+            _set_order(case, candidate, sid, prev_year, mid)
+            candidate_results, _ = _evaluate_all(
+                case, candidate, scenarios
+            )
+
+            candidate_shortage = sum(
+                result.kpis["shortage_total"]
+                for result in candidate_results.values()
+            )
+            if (
+                candidate_shortage <= base_shortage + 1e-8
+                and _reserve_is_feasible(candidate_results)
+                and _storage_is_feasible(candidate_results)
+            ):
+                hi = mid
+                best_trial = candidate
+                best_results = candidate_results
+            else:
+                lo = mid
+
+        if best_trial is not None:
+            freed = current_order - hi
+            if freed > 1e-6:
+                candidates.append((
+                    freed,
+                    sid,
+                    best_trial,
+                    best_results,
+                ))
+
+    if not candidates:
+        return plan, False
+
+    _, _, best_plan, _ = max(
+        candidates,
+        key=lambda x: (x[0], x[1]),
+    )
+    return best_plan, True
+
+
 def _repair_service_shortage(
     case: Case,
     seed: Plan,
@@ -505,6 +599,14 @@ def _repair_service_shortage(
             ))
 
         if not candidates:
+            freed_plan, freed = _free_storage_before_year(
+                case, current, scenarios, worst_year
+            )
+            if freed:
+                current = freed_plan
+                iterations += 1
+                continue
+
             diagnostics.append(
                 f"service repair stalled at {worst_year}; "
                 f"shortage={current_year_shortage:.2f}t"
