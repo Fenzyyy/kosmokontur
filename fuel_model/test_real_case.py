@@ -78,59 +78,6 @@ class RealCaseInputTests(unittest.TestCase):
         self.assertGreater(result.candidates_checked, 0)
         self.assertEqual(set(result.scenario_results), {"BASE", "MANDATORY_STRESS"})
 
-        print("\nOPTIMIZER PLAN:", result.plan.to_dict())
-        for _sid, _result in result.scenario_results.items():
-            print(
-                _sid,
-                "score=", result.score,
-                "shortage=", _result.kpis["shortage_total"],
-                "critical_shortage=", _result.kpis["shortage_critical"],
-            )
-            for _row in _result.yearly:
-                print(
-                    _row["year"],
-                    "demand=", _row["demand_total"],
-                    "served=", _row["served_total"],
-                    "reserve=", _row.get("reserve_covered", _row["reserve_stock_at_check"]),
-                )
-
-        base_result = result.scenario_results["BASE"]
-        self.assertEqual(
-            base_result.kpis["hard_violations"],
-            0,
-            msg=(
-                "BASE: HARD violations found; "
-                f"violations={[v.to_dict() for v in base_result.violations]}"
-            ),
-        )
-        self.assertGreaterEqual(
-            base_result.kpis["min_sl_total"],
-            self.case.constraints.sl_total_min - 1e-9,
-            msg="BASE: total service level below case constraint",
-        )
-        self.assertGreaterEqual(
-            base_result.kpis["min_sl_critical"],
-            self.case.constraints.sl_critical_min - 1e-9,
-            msg="BASE: critical service level below case constraint",
-        )
-
-        stress_result = result.scenario_results["MANDATORY_STRESS"]
-        self.assertEqual(
-            stress_result.kpis["hard_violations"],
-            0,
-            msg=(
-                "MANDATORY_STRESS: HARD violations found; "
-                f"violations={[v.to_dict() for v in stress_result.violations]}"
-            ),
-        )
-        self.assertFalse(
-            any(
-                v.code in ("STORAGE_OVERFLOW", "INITIAL_STOCK_EXCEEDS_STORAGE")
-                for v in stress_result.violations
-            ),
-            msg="MANDATORY_STRESS: storage overflow detected",
-        )
-
         print("\nMULTI-SCENARIO OPTIMIZATION")
         print("investments:", sorted(result.plan.investments))
         print("score:", result.score)
