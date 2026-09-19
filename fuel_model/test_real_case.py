@@ -76,7 +76,38 @@ class RealCaseInputTests(unittest.TestCase):
         )
 
         self.assertGreater(result.candidates_checked, 0)
-        self.assertEqual(set(result.scenario_results), {"BASE", "MANDATORY_STRESS"})
+        self.assertEqual(
+            set(result.scenario_results),
+            {"BASE", "MANDATORY_STRESS"},
+        )
+
+        base_result = result.scenario_results["BASE"]
+        self.assertEqual(base_result.kpis["hard_violations"], 0)
+        self.assertGreaterEqual(
+            base_result.kpis["min_sl_total"],
+            self.case.constraints.sl_total_min - 1e-9,
+        )
+        self.assertGreaterEqual(
+            base_result.kpis["min_sl_critical"],
+            self.case.constraints.sl_critical_min - 1e-9,
+        )
+        self.assertFalse(
+            any(v.code == "LEAD_TIME_OPTIMISTIC" for v in base_result.violations),
+            msg="BASE: selected investment uses optimistic lead time",
+        )
+
+        stress_result = result.scenario_results["MANDATORY_STRESS"]
+        self.assertEqual(stress_result.kpis["hard_violations"], 0)
+        self.assertFalse(
+            any(
+                v.code in (
+                    "STORAGE_OVERFLOW",
+                    "INITIAL_STOCK_EXCEEDS_STORAGE",
+                )
+                for v in stress_result.violations
+            ),
+            msg="MANDATORY_STRESS: physical storage violation detected",
+        )
 
         print("\nMULTI-SCENARIO OPTIMIZATION")
         print("investments:", sorted(result.plan.investments))
