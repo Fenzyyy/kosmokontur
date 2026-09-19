@@ -1,0 +1,41 @@
+{
+  "plan_id": "optimizer_EARTH_NEW_ZBO",
+  "name": "Selected investment plan — BASE snapshot",
+  "notes": "Confirmed investment plan selected by the real-case optimizer for BASE + MANDATORY_STRESS. The investment schedule is reconstructed exactly from the optimizer's investment-decision rule. Detailed annual orders/reservations are not included because the saved CI material did not persist the final Plan object.",
+  "initial_stock": [],
+  "orders": {},
+  "reserved": {},
+  "investments": {
+    "EARTH_NEW": {
+      "stage_dates": [
+        "2035-01",
+        "2035-01"
+      ],
+      "in_service": "2037-01"
+    },
+    "ZBO": {
+      "stage_dates": [
+        "2036-01"
+      ],
+      "in_service": "2036-01"
+    }
+  },
+  "_result_context": {
+    "snapshot_type": "confirmed_kpi_snapshot",
+    "scenario_id": "BASE",
+    "horizon": [2035, 2040],
+    "engine_version": "0.1.0",
+    "selected_investments": ["EARTH_NEW", "ZBO"],
+    "optimizer_status": "selected",
+    "replayable_from_this_file_alone": false,
+    "confirmed_kpis": {
+      "total_cost_mln_u_e": 11679.21141579257,
+      "pv_cost_mln_u_e": 10017.725795760323,
+      "min_total_service": 1.0,
+      "min_critical_service": 1.0,
+      "shortage_total_t": 0.0,
+      "hard_violations": 0,
+      "benchmark_misses": 0
+    }
+  }
+}

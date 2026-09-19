@@ -1,0 +1,2 @@
+snapshot_type,scenario_id,plan_id,horizon_start,horizon_end,selected_investments,total_cost_mln_u_e,pv_cost_mln_u_e,min_total_service,min_critical_service,shortage_total_t,hard_violations,benchmark_misses,status
+confirmed_kpi_snapshot,MANDATORY_STRESS,optimizer_EARTH_NEW_ZBO,2035,2040,EARTH_NEW+ZBO,12257.593484740883,10507.29048513694,0.8767481716952618,0.88754,57.43107284855796,0,2,CONFIRMED

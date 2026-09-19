@@ -1,0 +1,47 @@
+{
+  "plan_id": "optimizer_EARTH_NEW_ZBO",
+  "name": "Selected investment plan — MANDATORY STRESS snapshot",
+  "notes": "Confirmed investment plan evaluated in the mandatory stress scenario. The investment schedule is reconstructed exactly from the optimizer's investment-decision rule. Detailed annual orders/reservations are not included because the saved CI material did not persist the final Plan object.",
+  "initial_stock": [],
+  "orders": {},
+  "reserved": {},
+  "investments": {
+    "EARTH_NEW": {
+      "stage_dates": [
+        "2035-01",
+        "2035-01"
+      ],
+      "in_service": "2037-01"
+    },
+    "ZBO": {
+      "stage_dates": [
+        "2036-01"
+      ],
+      "in_service": "2036-01"
+    }
+  },
+  "_result_context": {
+    "snapshot_type": "confirmed_kpi_snapshot",
+    "scenario_id": "MANDATORY_STRESS",
+    "horizon": [2035, 2040],
+    "engine_version": "0.1.0",
+    "selected_investments": ["EARTH_NEW", "ZBO"],
+    "optimizer_status": "selected",
+    "replayable_from_this_file_alone": false,
+    "scenario_changes": [
+      "Общий и критический спрос x1.15 в 2038-2040",
+      "Переменная цена Earth-Core/Earth-Flex x1.25 в 2038-2039",
+      "Фактическая поставка Lunar-ISRU: 55% плана в 2038, 75% в 2039",
+      "Предел потерь <=2% валового поступления с 2038 г."
+    ],
+    "confirmed_kpis": {
+      "total_cost_mln_u_e": 12257.593484740883,
+      "pv_cost_mln_u_e": 10507.29048513694,
+      "min_total_service": 0.8767481716952618,
+      "min_critical_service": 0.88754,
+      "shortage_total_t": 57.43107284855796,
+      "hard_violations": 0,
+      "benchmark_misses": 2
+    }
+  }
+}
