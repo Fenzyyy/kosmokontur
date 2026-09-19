@@ -156,6 +156,21 @@ class RealCaseInputTests(unittest.TestCase):
             )
         )
 
+        print("\nINVESTMENT FRONTIER")
+        for summary in result.candidate_summaries:
+            base_metrics = summary.scenario_metrics.get("BASE", {})
+            stress_metrics = summary.scenario_metrics.get("MANDATORY_STRESS", {})
+            investments = "+".join(summary.investments) or "NONE"
+            print(
+                f"{investments:28s} "
+                f"status={summary.status:9s} "
+                f"selected={str(summary.selected):5s} "
+                f"CAPEX={summary.capex_total:7.1f} "
+                f"BASE_SL={base_metrics.get('min_sl_total', float('nan')):7.2%} "
+                f"STRESS_SL={stress_metrics.get('min_sl_total', float('nan')):7.2%} "
+                f"STRESS_SHORT={stress_metrics.get('shortage_total', float('nan')):7.2f}"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
