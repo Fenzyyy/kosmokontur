@@ -291,6 +291,15 @@ def test_api_rejects_invalid_scenario_and_plan():
     )
     assert bad_scenario_list.status_code == 422
 
+    bad_frontier_scenario_list = client.post(
+        "/api/frontier",
+        json={
+            "plan": defaults["plan_template"],
+            "scenario_ids": [],
+        },
+    )
+    assert bad_frontier_scenario_list.status_code == 422
+
 
 def test_canonical_investment_schedule_dates_for_real_case():
     c = case()
