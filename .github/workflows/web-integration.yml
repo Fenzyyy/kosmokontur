@@ -1,0 +1,73 @@
+name: web integration
+
+on:
+  push:
+    branches: ["feature/web-app", "main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  web-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest httpx
+
+      - name: Run web integration tests
+        run: PYTHONPATH=. pytest -q tests/test_web_api.py
+
+      - name: Run organizer reference-vector tests
+        run: PYTHONPATH=. pytest -q tests/test_reference_cases.py
+
+      - name: Verify frontend JavaScript syntax
+        run: node --check frontend/app.js
+
+      - name: Docker build and health smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -t kosmokontur-web .
+          docker run -d --rm --name kosmokontur-web -p 18000:8000 kosmokontur-web
+          trap 'docker stop kosmokontur-web >/dev/null 2>&1 || true' EXIT
+          python - <<'PY'
+          import json
+          import time
+          import urllib.request
+
+          url = "http://127.0.0.1:18000/api/health"
+          last_error = None
+          for _ in range(30):
+              try:
+                  with urllib.request.urlopen(url, timeout=2) as response:
+                      payload = json.load(response)
+                  assert payload["ok"] is True
+                  assert payload["engine"] == "fuel_model"
+                  print("Docker health OK:", payload["engine_version"])
+                  break
+              except Exception as exc:
+                  last_error = exc
+                  time.sleep(1)
+          else:
+              raise SystemExit(f"Container health check failed: {last_error}")
+          PY
+
+      - name: Verify frontend has no external runtime URLs
+        shell: python
+        run: |
+          from pathlib import Path
+          text = Path("frontend/index.html").read_text(encoding="utf-8")
+          js = Path("frontend/app.js").read_text(encoding="utf-8")
+          forbidden = ("https://", "http://")
+          assert not any(x in text for x in forbidden), "external URL found in frontend/index.html"
+          assert "cdn." not in js.lower(), "CDN reference found in frontend/app.js"

@@ -1,0 +1,13 @@
+{
+  "case_id": "V05",
+  "source": "SpaceEconomyPolicy/test_oil:validation/control_cases.md",
+  "description": "Пропорциональная плата за резервирование",
+  "inputs": {
+    "annual_reserved_capacity_t_per_year": 100,
+    "reservation_rate_mln_per_t_year": 0.4,
+    "period_fraction": 0.5
+  },
+  "expected": {
+    "reservation_payment_mln": 20
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "case_id": "V09",
+  "source": "SpaceEconomyPolicy/test_oil:validation/control_cases.md",
+  "description": "Критический спрос вложен в общий",
+  "inputs": {
+    "total_demand_t": 100,
+    "critical_demand_t": 60
+  },
+  "expected": {
+    "total_demand_t": 100
+  }
+}

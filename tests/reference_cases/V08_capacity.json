@@ -1,0 +1,13 @@
+{
+  "case_id": "V08",
+  "source": "SpaceEconomyPolicy/test_oil:validation/control_cases.md",
+  "description": "Превышение мощности",
+  "inputs": {
+    "capacity_t_per_year": 10,
+    "reserved_capacity_t_per_year": 12
+  },
+  "expected": {
+    "violation": "CAPACITY_EXCEEDED",
+    "excess_t_per_year": 2
+  }
+}

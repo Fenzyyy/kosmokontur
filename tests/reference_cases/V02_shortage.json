@@ -1,0 +1,17 @@
+{
+  "case_id": "V02",
+  "source": "SpaceEconomyPolicy/test_oil:validation/control_cases.md",
+  "description": "Дефицит не является отрицательным запасом",
+  "inputs": {
+    "opening_inventory_t": 0,
+    "delivered_t": 8,
+    "losses_t": 0,
+    "demand_critical_t": 6,
+    "demand_total_t": 10
+  },
+  "expected": {
+    "served_t": 8,
+    "shortage_t": 2,
+    "closing_inventory_t": 0
+  }
+}

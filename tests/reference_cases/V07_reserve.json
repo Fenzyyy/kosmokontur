@@ -1,0 +1,13 @@
+{
+  "case_id": "V07",
+  "source": "SpaceEconomyPolicy/test_oil:validation/control_cases.md",
+  "description": "45-дневный резерв",
+  "inputs": {
+    "annual_total_demand_t": 365,
+    "reserve_days": 45,
+    "year_days": 365
+  },
+  "expected": {
+    "reserve_t": 45
+  }
+}

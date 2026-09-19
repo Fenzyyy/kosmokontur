@@ -1,0 +1,12 @@
+{
+  "plan_id": "synthetic-negative-reservation",
+  "scenario_id": "SYNTHETIC",
+  "decisions": {
+    "supply_orders": [],
+    "capacity_reservations": [
+      {"source_id": "Source-X", "year": 2035, "reserved_capacity_t": -1}
+    ],
+    "investments": [],
+    "inventory_policy": {}
+  }
+}
