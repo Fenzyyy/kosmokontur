@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from fuel_model.engine import ENGINE_VERSION
 from fuel_model.investments import build_investment_decision, decision_to_dict
 from fuel_model.loader import load_case
 from fuel_model.model import Plan
@@ -68,7 +69,7 @@ def health():
         return {
             "ok": True,
             "engine": "fuel_model",
-            "engine_version": "0.1.0",
+            "engine_version": ENGINE_VERSION,
             "years": [c.first_year, c.last_year],
             "sources": [
                 {
