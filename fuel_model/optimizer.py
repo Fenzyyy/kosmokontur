@@ -223,32 +223,49 @@ def _candidate_initial_stock(case: Case, plan: Plan) -> None:
 def _build_greedy_plan(
     case: Case,
     base_plan: Plan,
-    scenario: Scenario,
+    scenarios: Sequence[Scenario],
     initial_reserve: bool,
 ) -> Plan:
-    """Сформировать стартовый supply plan для выбранных инвестиций."""
+    """Сформировать робастный стартовый supply plan для всех сценариев.
+
+    Для начального кандидата берём максимум спроса по сценариям и минимальную
+    долю фактической поставки по каждому каналу. Это не заменяет evaluate():
+    точная физика по-прежнему считается в engine.evaluate().
+    """
     plan = copy.deepcopy(base_plan)
 
     if initial_reserve:
         _candidate_initial_stock(case, plan)
 
-    demand = case.demand_series(scenario.demand_variant, scenario.demand_multiplier)
+    scenario_list = tuple(scenarios)
+    if not scenario_list:
+        raise ValueError("Для greedy-плана нужен хотя бы один сценарий")
 
-    # Это только грубая годовая оценка для построения стартового кандидата.
-    # Точную физику затем считает evaluate().
+    demand_by_scenario = {
+        scenario.scenario_id: case.demand_series(
+            scenario.demand_variant,
+            scenario.demand_multiplier,
+        )
+        for scenario in scenario_list
+    }
+
     inventory = sum(lot.tons for lot in plan.initial_stock)
 
     for year in case.years:
-        total_demand, _ = demand[year]
+        total_demand = max(
+            demand[year][0] for demand in demand_by_scenario.values()
+        )
+
         if year != case.last_year:
-            next_total, _ = demand[year + 1]
+            next_total = max(
+                demand[year + 1][0] for demand in demand_by_scenario.values()
+            )
             next_reserve = next_total * case.constraints.reserve_days / 365.0
         else:
             next_reserve = 0.0
 
-        target_close = next_reserve
-        need = max(0.0, total_demand + target_close - inventory)
-        year_order = 0.0
+        need = max(0.0, total_demand + next_reserve - inventory)
+        year_actual_delivery = 0.0
 
         res = resolve(case, plan)
         available = []
@@ -256,19 +273,48 @@ def _build_greedy_plan(
             frac = res.cal.fraction_available(year, res.avail_day[sid])
             if frac <= 1e-12:
                 continue
-            available.append((sid, frac, source.capacity * frac))
 
-        available.sort(key=lambda x: _source_rank(case, x[0]))
+            min_share = min(
+                scenario.delivery_share.get((sid, year), 1.0)
+                for scenario in scenario_list
+            )
+            min_share = max(0.0, float(min_share))
+            max_order = source.capacity * frac
+            max_actual = max_order * min_share
 
-        for sid, _frac, max_order in available:
+            rank = (
+                (source.variable_cost + source.reservation_rate) / min_share
+                if min_share > 1e-12
+                else float("inf")
+            )
+            available.append((sid, frac, max_order, max_actual, rank))
+
+        available.sort(key=lambda x: (x[4], _source_rank(case, x[0])))
+
+        for sid, _frac, max_order, max_actual, _rank in available:
             if need <= 1e-9:
                 break
-            order = min(need, max_order)
-            _set_order(case, plan, sid, year, order)
-            year_order += order
-            need -= order
 
-        inventory = max(0.0, inventory + year_order - total_demand)
+            min_share = min(
+                scenario.delivery_share.get((sid, year), 1.0)
+                for scenario in scenario_list
+            )
+            min_share = max(0.0, float(min_share))
+
+            if min_share <= 1e-12:
+                continue
+
+            actual_need = min(need, max_actual)
+            order = min(max_order, actual_need / min_share)
+            if order <= 1e-9:
+                continue
+
+            _set_order(case, plan, sid, year, order)
+            actual_received = order * min_share
+            year_actual_delivery += actual_received
+            need -= actual_received
+
+        inventory = max(0.0, inventory + year_actual_delivery - total_demand)
 
     return plan
 
@@ -425,7 +471,7 @@ def optimize(
             seed = _build_greedy_plan(
                 case,
                 seed,
-                scenario_list[0],
+                scenario_list,
                 config.initial_reserve,
             )
 
