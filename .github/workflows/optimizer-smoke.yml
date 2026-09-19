@@ -20,7 +20,7 @@ jobs:
       - name: Smoke test optimizer
         run: |
           python - <<'PY'
-          from fuel_model.model import Case, Constraints, DemandRow, Plan, Source, StorageMode
+          from fuel_model.model import Case, Constraints, DemandRow, Source, StorageMode
           from fuel_model.optimizer import optimize
           from fuel_model.scenarios import base
 
@@ -72,3 +72,6 @@ jobs:
           assert result.scenario_results["BASE"].kpis["shortage_total"] < 1e-8
           assert result.scenario_results["BASE"].kpis["shortage_critical"] < 1e-8
           PY
+
+      - name: Run optimizer unit tests
+        run: python -m unittest fuel_model.test_optimizer -v
