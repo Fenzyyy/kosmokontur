@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from fuel_model.investments import build_investment_decision, decision_to_dict
 from fuel_model.loader import load_case
 from fuel_model.model import Plan
 from fuel_model.scenarios import get
@@ -126,6 +127,11 @@ def defaults():
                     "stage_amounts": list(o.stage_amounts),
                     "capex": o.total_capex,
                     "earliest_in_service_year": o.earliest_in_service_year,
+                    "default_schedule": (
+                        decision_to_dict(decision)
+                        if (decision := build_investment_decision(c, o.option_id)) is not None
+                        else None
+                    ),
                 }
                 for o in c.options.values()
             ],
