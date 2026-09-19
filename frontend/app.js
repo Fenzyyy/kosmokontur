@@ -1,298 +1,78 @@
-/*
-  Frontend adapter.
-  ВАЖНО: расчёт выполняет fuel_model на Python API.
-  JS только собирает JSON, отправляет его и отображает Result.
-*/
-
-const API_BASE = window.ENGINE_API_URL || ((location.protocol === "http:" || location.protocol === "https:") ? location.origin : "http://localhost:8000");
-
-let defaults = null;
-let lastResult = null;
-let fuelChart = null;
-let capexChart = null;
-
-const $ = (id) => document.getElementById(id);
-const fmt = (v, digits = 1) =>
-  Number(v ?? 0).toLocaleString("ru-RU", { maximumFractionDigits: digits });
-
-function setStatus(text, kind = "warn") {
-  $("status").innerHTML = `<span class="badge ${kind}">${text}</span>`;
+const API=window.ENGINE_API_URL||"";
+const $=id=>document.getElementById(id);
+let defaults=null,plan=null,lastResult=null,currentScenario="BASE";
+async function api(path,opt={}){const r=await fetch(API+path,opt);const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.detail||"HTTP "+r.status);return b}
+function msg(id,t,c){$(id).textContent=t||"";$(id).className="message "+(c||"")}
+function fmt(x,d=1){return x==null||Number.isNaN(Number(x))?"—":Number(x).toLocaleString("ru-RU",{maximumFractionDigits:d})}
+function clone(x){return JSON.parse(JSON.stringify(x))}
+function view(v){document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active",b.dataset.view===v));document.querySelectorAll(".view").forEach(x=>x.classList.toggle("active",x.id==="view-"+v))}
+document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>view(b.dataset.view));
+function sync(){$("planJson").value=JSON.stringify(plan,null,2)}
+function renderOrders(){let y=defaults.years,h="<table><thead><tr><th>Источник</th>"+y.map(x=>"<th>"+x+"</th>").join("")+"</tr></thead><tbody>";defaults.sources.forEach(s=>{h+="<tr><td><strong>"+s.name+"</strong><br><small>"+s.id+" · cap "+fmt(s.capacity)+" t/y</small></td>";y.forEach(yr=>{let v=plan.orders?.[s.id]?.[yr]??0;h+='<td><input type="number" min="0" step="0.1" data-s="'+s.id+'" data-y="'+yr+'" value="'+v+'"></td>'});h+="</tr>"});$("ordersEditor").innerHTML=h+"</tbody></table>";$("ordersEditor").querySelectorAll("input").forEach(i=>i.oninput=e=>{let s=e.target.dataset.s,y=Number(e.target.dataset.y);plan.orders[s]??={};plan.orders[s][y]=Number(e.target.value)||0})}
+function renderReserve(){let y=defaults.years,h="<table><thead><tr><th>Источник</th>"+y.map(x=>"<th>"+x+"</th>").join("")+"</tr></thead><tbody>";defaults.sources.forEach(s=>{h+="<tr><td>"+s.name+"</td>";y.forEach(yr=>{let v=plan.reserved?.[s.id]?.[yr]??0;h+='<td><input type="number" min="0" step="0.1" data-s="'+s.id+'" data-y="'+yr+'" value="'+v+'"></td>'});h+="</tr>"});$("reserveEditor").innerHTML=h+"</tbody></table>";$("reserveEditor").querySelectorAll("input").forEach(i=>i.oninput=e=>{let s=e.target.dataset.s,y=Number(e.target.dataset.y);plan.reserved[s]??={};plan.reserved[s][y]=Number(e.target.value)||0})}
+function investmentDefault(id){let o=defaults.investments.find(x=>x.id===id),first=defaults.years[0],service=o.earliest_in_service_year||(id==="EARTH_NEW"?first+2:first),n=(o.stage_labels||[]).length||1;return{stage_dates:Array(n).fill(first+"-01"),in_service:service+"-01"}}
+function renderInvestments(){let sel=new Set(Object.keys(plan.investments||{}));$("investmentEditor").innerHTML=defaults.investments.map(o=>'<label class="investment"><input type="checkbox" data-i="'+o.id+'" '+(sel.has(o.id)?"checked":"")+'><div><strong>'+o.id+'</strong><small>'+o.kind+" → "+o.target_id+" · CAPEX "+fmt(o.capex,0)+" млн</small></div></label>").join("");$("investmentEditor").querySelectorAll("input").forEach(i=>i.onchange=e=>{let id=e.target.dataset.i;if(e.target.checked)plan.investments[id]=investmentDefault(id);else delete plan.investments[id];sync()})}
+function renderStock(){let h="";defaults.sources.forEach(s=>{let v=(plan.initial_stock||[]).filter(x=>x.source===s.id).reduce((a,x)=>a+Number(x.tons||0),0);h+='<div class="stock"><label>'+s.name+'</label><input type="number" min="0" step="0.1" data-stock="'+s.id+'" value="'+v+'"></div>'});$("stockEditor").innerHTML=h;$("stockEditor").querySelectorAll("input").forEach(i=>i.oninput=e=>{let id=e.target.dataset.stock,v=Number(e.target.value)||0;plan.initial_stock=(plan.initial_stock||[]).filter(x=>x.source!==id);if(v>0)plan.initial_stock.push({source:id,tons:v});sync()})}
+function editors(){$("yearRange").textContent=defaults.years[0]+"—"+defaults.years[defaults.years.length-1];renderOrders();renderReserve();renderInvestments();renderStock();sync()}
+function loadPlan(p){plan=clone(p);editors()}
+async function optimize(){msg("planMessage","Оптимизатор выполняется…");$("optimizeBtn").disabled=true;try{sync();let ids=["BASE"];if($("stressScenario").checked)ids.push("MANDATORY_STRESS");lastResult=await api("/api/optimize",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({plan:plan,scenario_ids:ids,run_frontier:true})});plan=clone(lastResult.plan);editors();$("resultJson").textContent=JSON.stringify(lastResult,null,2);renderDashboard();renderFrontier();msg("planMessage",lastResult.feasible?"План найден без HARD-нарушений":"Найден лучший доступный план; проверьте dashboard",lastResult.feasible?"good":"");view("dashboard")}catch(e){msg("planMessage",e.message,"bad")}finally{$("optimizeBtn").disabled=false}}
+function renderDashboard(){let r=lastResult?.scenarios?.[currentScenario];if(!r){$("dashboardContent").innerHTML='<div class="dashboard-empty"><h3>Нет результата для сценария</h3></div>';return}let k=r.kpis||{},good=r.feasible;$("dashboardContent").innerHTML='<div class="result-status '+(good?"good":"bad")+'"><div><strong>'+(good?"Допустимый план":"Есть HARD-нарушения")+'</strong><p>'+(r.meta?.name||currentScenario)+'</p></div><span class="status '+(good?"ok":"bad")+'">'+(good?"FEASIBLE":"CHECK")+'</span></div><div class="kpis"><div class="kpi"><div class="label">PV COST</div><div class="value">'+fmt(k.pv_cost)+' млн</div></div><div class="kpi"><div class="label">CAPEX</div><div class="value">'+fmt(k.capex_total)+' млн</div></div><div class="kpi"><div class="label">SHORTAGE</div><div class="value">'+fmt(k.shortage_total)+' т</div></div><div class="kpi"><div class="label">MIN SL TOTAL</div><div class="value">'+fmt((k.min_sl_total||0)*100,2)+'%</div></div><div class="kpi"><div class="label">MIN SL CRITICAL</div><div class="value">'+fmt((k.min_sl_critical||0)*100,2)+'%</div></div></div><div class="charts"><div class="card"><div class="card-head"><div><h3>Запас топлива</h3><span>Запас и требуемый резерв.</span></div></div><div class="chart-box"><div id="inventoryChart" class="svg-chart"></div></div></div><div class="card"><div class="card-head"><div><h3>CAPEX</h3><span>Капитальные затраты по годам.</span></div></div><div class="chart-box"><div id="capexChart" class="svg-chart"></div></div></div></div><div class="two-col"><div class="card"><div class="card-head"><h3>Годовая физика</h3></div><div id="yearlyTable" class="table-scroll"></div></div><div class="card"><div class="card-head"><h3>Нарушения / проверки</h3></div><div id="violations"></div></div></div>';drawCharts(r);renderYearly(r);renderViolations(r)}
+function chartSvg(el,series,kind){
+ const w=760,h=300,p={l:58,r:18,t:22,b:42},iw=w-p.l-p.r,ih=h-p.t-p.b;
+ const vals=series.flatMap(s=>s.data.map(Number).filter(Number.isFinite)),max=Math.max(...vals,1),min=Math.min(...vals,0);
+ const sx=i=>p.l+(series[0].data.length===1?iw/2:iw*i/(series[0].data.length-1));
+ const sy=v=>p.t+ih-(v-min)/(max-min||1)*ih;
+ const esc=s=>String(s).replaceAll("&","&amp;").replaceAll("<","&lt;");
+ let svg='<svg viewBox="0 0 '+w+' '+h+'" role="img" aria-label="chart">';
+ [0,.5,1].forEach(t=>{let y=p.t+ih*t;let v=max-(max-min)*t;svg+='<line x1="'+p.l+'" y1="'+y+'" x2="'+(w-p.r)+'" y2="'+y+'" class="grid"/><text x="'+(p.l-8)+'" y="'+(y+4)+'" text-anchor="end" class="axis">'+esc(fmt(v))+'</text>'});
+ const n=series[0].data.length;
+ if(n){[0,Math.floor((n-1)/2),n-1].filter((v,i,a)=>a.indexOf(v)===i).forEach(i=>{svg+='<text x="'+sx(i)+'" y="'+(h-14)+'" text-anchor="middle" class="axis">'+esc(series[0].labels[i])+'</text>'})}
+ series.forEach((s,si)=>{
+   if(kind==="bar"){let bw=Math.max(4,iw/Math.max(n,1)*.55);s.data.forEach((v,i)=>{let y=sy(Number(v));svg+='<rect x="'+(sx(i)-bw/2)+'" y="'+y+'" width="'+bw+'" height="'+(p.t+ih-y)+'" class="bar b'+si+'"/>'})}
+   else {let pts=s.data.map((v,i)=>sx(i)+","+sy(Number(v))).join(" ");svg+='<polyline points="'+pts+'" class="line l'+si+'" fill="none"/>';s.data.forEach((v,i)=>{svg+='<circle cx="'+sx(i)+'" cy="'+sy(Number(v))+'" r="3" class="dot d'+si+'"/>'})}
+ });
+ svg+='<line x1="'+p.l+'" y1="'+(p.t+ih)+'" x2="'+(w-p.r)+'" y2="'+(p.t+ih)+'" class="axis-line"/>';
+ svg+='</svg>';$(el).innerHTML=svg;
 }
-
-async function api(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, options);
-  let data = null;
-  try { data = await response.json(); } catch (_) {}
-  if (!response.ok) {
-    const message = data?.detail || data?.error || `HTTP ${response.status}`;
-    throw new Error(message);
-  }
-  return data;
+function chartSvg(el,series,kind){
+ const w=760,h=300,p={l:58,r:18,t:22,b:42},iw=w-p.l-p.r,ih=h-p.t-p.b;
+ const vals=series.flatMap(s=>s.data.map(Number).filter(Number.isFinite));
+ const max=Math.max(...vals,1),min=Math.min(...vals,0);
+ const sx=i=>p.l+(series[0].data.length===1?iw/2:iw*i/(series[0].data.length-1));
+ const sy=v=>p.t+ih-(v-min)/(max-min||1)*ih;
+ const esc=s=>String(s).replaceAll("&","&amp;").replaceAll("<","&lt;");
+ let svg='<svg viewBox="0 0 '+w+' '+h+'">';
+ [0,.5,1].forEach(t=>{const y=p.t+ih*t,v=max-(max-min)*t;svg+='<line x1="'+p.l+'" y1="'+y+'" x2="'+(w-p.r)+'" y2="'+y+'" class="grid"/><text x="'+(p.l-8)+'" y="'+(y+4)+'" text-anchor="end" class="axis">'+esc(fmt(v))+'</text>'});
+ const n=series[0].data.length;
+ if(n){[0,Math.floor((n-1)/2),n-1].filter((v,i,a)=>a.indexOf(v)===i).forEach(i=>svg+='<text x="'+sx(i)+'" y="'+(h-14)+'" text-anchor="middle" class="axis">'+esc(series[0].labels[i])+'</text>')}
+ series.forEach((s,si)=>{if(kind==="bar"){const bw=Math.max(4,iw/Math.max(n,1)*.55);s.data.forEach((v,i)=>{const y=sy(Number(v));svg+='<rect x="'+(sx(i)-bw/2)+'" y="'+y+'" width="'+bw+'" height="'+(p.t+ih-y)+'" class="bar b'+si+'"/>'})}else{const pts=s.data.map((v,i)=>sx(i)+","+sy(Number(v))).join(" ");svg+='<polyline points="'+pts+'" class="line l'+si+'" fill="none"/>';s.data.forEach((v,i)=>svg+='<circle cx="'+sx(i)+'" cy="'+sy(Number(v))+'" r="3" class="dot d'+si+'"/>')}});
+ svg+='<line x1="'+p.l+'" y1="'+(p.t+ih)+'" x2="'+(w-p.r)+'" y2="'+(p.t+ih)+'" class="axis-line"/></svg>';
+ $(el).innerHTML=svg;
 }
-
-async function loadDefaults() {
-  try {
-    defaults = await api("/api/defaults");
-    $("connection").className = "badge ok";
-    $("connection").textContent = "API подключён";
-
-    $("planJson").value = JSON.stringify(defaults.plan_template, null, 2);
-    $("demandVariant").value = "base";
-    $("scenarioKind").value = "base";
-    $("isruStressShare").value = defaults.ui?.isru_stress_share ?? "";
-    $("inputJson").textContent = JSON.stringify(defaults, null, 2);
-  } catch (err) {
-    $("connection").className = "badge bad";
-    $("connection").textContent = "API недоступен";
-    $("planError").textContent =
-      `Не удалось подключиться к ${API_BASE}. Запустите backend/api.py. ${err.message}`;
-  }
+function drawCharts(r){
+ const y=r.yearly||[];
+ chartSvg("inventoryChart",[
+  {labels:y.map(x=>x.year),data:y.map(x=>x.inventory_close)},
+  {labels:y.map(x=>x.year),data:y.map(x=>x.reserve_required)}
+ ],"line");
+ const c=r.costs||[];
+ chartSvg("capexChart",[{labels:c.map(x=>x.year),data:c.map(x=>x.capex)}],"bar");
 }
-
-function parsePlan() {
-  $("planError").textContent = "";
-  try {
-    const plan = JSON.parse($("planJson").value);
-    if (!plan || typeof plan !== "object") throw new Error("Plan должен быть JSON-объектом.");
-    return plan;
-  } catch (err) {
-    $("planError").textContent = `Ошибка JSON: ${err.message}`;
-    throw err;
-  }
+function renderYearly(r){let cols=["year","demand_total","served_total","shortage_total","inventory_close","reserve_required","reserve_covered"];$("yearlyTable").innerHTML="<table><thead><tr>"+cols.map(x=>"<th>"+x+"</th>").join("")+"</tr></thead><tbody>"+(r.yearly||[]).map(row=>"<tr>"+cols.map(x=>"<td>"+fmt(row[x])+"</td>").join("")+"</tr>").join("")+"</tbody></table>"}
+function renderViolations(r){let vs=r.violations||[];$("violations").innerHTML=vs.length?vs.map(v=>'<div class="violation"><strong>'+(v.severity||"CHECK")+" · "+(v.code||"")+'</strong><span>'+(v.message||v.detail||"")+(v.year?" · "+v.year:"")+"</span></div>").join(""):'<div class="message good">Нарушений не обнаружено.</div>'}
+document.querySelectorAll(".scenario-btn").forEach(b=>b.onclick=()=>{currentScenario=b.dataset.scenario;document.querySelectorAll(".scenario-btn").forEach(x=>x.classList.toggle("active",x===b));renderDashboard()});
+function renderFrontier(){
+ const pts=lastResult?.frontier||[],valid=pts.filter(p=>p.status==="evaluated"&&p.capex_total!=null&&p.service_level_base!=null);
+ const el=$("frontierChart"),w=760,h=320,p={l:62,r:22,t:22,b:48};
+ const xs=valid.map(q=>Number(q.capex_total)),ys=valid.map(q=>Number(q.service_level_base)*100);
+ const xmax=Math.max(...xs,1),xmin=Math.min(...xs,0),ymin=Math.min(...ys,0),ymax=Math.max(...ys,100);
+ const sx=v=>p.l+(v-xmin)/(xmax-xmin||1)*(w-p.l-p.r),sy=v=>p.t+(ymax-v)/(ymax-ymin||1)*(h-p.t-p.b);
+ let svg='<svg viewBox="0 0 '+w+' '+h+'"><line x1="'+p.l+'" y1="'+(h-p.b)+'" x2="'+(w-p.r)+'" y2="'+(h-p.b)+'" class="axis-line"/><line x1="'+p.l+'" y1="'+p.t+'" x2="'+p.l+'" y2="'+(h-p.b)+'" class="axis-line"/><text x="'+(w/2)+'" y="'+(h-8)+'" text-anchor="middle" class="axis">CAPEX, млн у.е.</text><text transform="translate(15 '+(h/2)+') rotate(-90)" text-anchor="middle" class="axis">MIN SL BASE, %</text>';
+ valid.forEach(q=>{svg+='<circle cx="'+sx(Number(q.capex_total))+'" cy="'+sy(Number(q.service_level_base)*100)+'" r="'+(q.selected?8:6)+'" class="frontier-point'+(q.selected?" selected":"")+'"><title>'+String(q.investments||[]).replaceAll("&","&amp;")+'</title></circle>'});
+ svg+='</svg>';el.innerHTML=svg;
+ $("frontierTable").innerHTML=pts.length?"<table><thead><tr><th>Инвестиции</th><th>CAPEX</th><th>SL BASE</th><th>SL STRESS</th><th>Shortage</th><th>Status</th></tr></thead><tbody>"+pts.map(p=>"<tr><td>"+(p.selected?"★ ":"")+(p.investments||[]).join(", ")+"</td><td>"+fmt(p.capex_total,0)+"</td><td>"+fmt((p.service_level_base||0)*100,2)+"%</td><td>"+fmt((p.service_level_stress||0)*100,2)+"%</td><td>"+fmt((p.shortage_base||0)+(p.shortage_stress||0))+"</td><td>"+p.status+"</td></tr>").join("")+"</tbody></table>":"<div class="message">Запустите оптимизацию, чтобы получить frontier.</div>";
 }
-
-function buildPayload() {
-  const plan = parsePlan();
-
-  const rawShare = $("isruStressShare").value.trim().replace(",", ".");
-  const share = rawShare === "" ? null : Number(rawShare);
-
-  if (share !== null && (!Number.isFinite(share) || share < 0 || share > 1)) {
-    throw new Error("Доля поставки ISRU должна быть числом от 0 до 1.");
-  }
-
-  return {
-    scenario_kind: $("scenarioKind").value,
-    demand_variant: $("demandVariant").value,
-    isru_stress_share: share,
-    plan
-  };
-}
-
-function renderKpis(data) {
-  const k = data.kpis || {};
-  $("kpis").innerHTML = [
-    ["PV cost, млн у.е.", fmt(k.pv_cost)],
-    ["Total cost, млн у.е.", fmt(k.total_cost)],
-    ["CAPEX, млн у.е.", fmt(k.capex_total)],
-    ["CAPEX до дедлайна, млн у.е.", fmt(k.capex_through_deadline)],
-    ["Обслужено, т", fmt(k.served_total)],
-    ["Дефицит, т", fmt(k.shortage_total)],
-    ["Критический дефицит, т", fmt(k.shortage_critical)],
-    ["Потери, т", fmt(k.losses_total)]
-  ].map(([label, value]) =>
-    `<div class="kpi"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div></div>`
-  ).join("");
-}
-
-function renderTable(data) {
-  const head = [
-    "Год", "Спрос", "Критический спрос", "Поставка",
-    "Потери", "Обслужено", "Дефицит", "Запас конец", "Резерв"
-  ];
-  $("resultTable").querySelector("thead").innerHTML =
-    `<tr>${head.map(x => `<th>${x}</th>`).join("")}</tr>`;
-
-  const rows = data.yearly || [];
-  $("resultTable").querySelector("tbody").innerHTML = rows.map(r => `
-    <tr>
-      <td>${r.year}</td>
-      <td>${fmt(r.demand_total)}</td>
-      <td>${fmt(r.demand_critical)}</td>
-      <td>${fmt(r.gross_inflow)}</td>
-      <td>${fmt(r.losses)}</td>
-      <td>${fmt(r.served_total)}</td>
-      <td>${fmt(r.shortage_total)}</td>
-      <td>${fmt(r.inventory_close)}</td>
-      <td>${fmt(r.reserve_required)}</td>
-    </tr>
-  `).join("");
-}
-
-function renderChecks(data) {
-  const violations = data.violations || [];
-  if (!violations.length) {
-    $("checks").innerHTML = `<div class="risk"><span class="badge ok">OK</span> Нарушений нет.</div>`;
-    $("violations").innerHTML = `<div class="hint">Движок не вернул нарушений.</div>`;
-    return;
-  }
-
-  const hard = violations.filter(v => v.severity === "HARD").length;
-  const benchmark = violations.filter(v => v.severity === "BENCHMARK").length;
-
-  $("checks").innerHTML = `
-    <div class="risk"><span class="badge ${hard ? "bad" : "ok"}">${hard ? "НАРУШЕНИЯ" : "OK"}</span>
-      HARD: ${hard}; benchmark: ${benchmark}</div>
-    <div class="hint">Полный набор проверок находится в JSON результата.</div>
-  `;
-
-  $("violations").innerHTML = violations.map(v => `
-    <div class="risk">
-      <strong>${v.code || ""}</strong>
-      <div class="hint">
-        ${v.severity || ""}${v.year != null ? ` · ${v.year}` : ""}
-        ${v.subject ? ` · ${v.subject}` : ""}
-        ${v.message ? `<br>${v.message}` : ""}
-      </div>
-    </div>
-  `).join("");
-}
-
-
-async function loadChartJs() {
-  if (window.Chart) return true;
-  return new Promise((resolve) => {
-    const script = document.createElement("script");
-    script.src = "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js";
-    script.async = true;
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.head.appendChild(script);
-  });
-}
-
-function renderCharts(data) {
-  const yearly = data.yearly || [];
-  const costs = data.costs || [];
-  const labels = yearly.map(r => r.year);
-
-  if (!window.Chart) return;
-  if (fuelChart) fuelChart.destroy();
-  if (capexChart) capexChart.destroy();
-
-  fuelChart = new Chart($("fuelChart"), {
-    type: "line",
-    data: {
-      labels,
-      datasets: [{
-        label: "Запас на конец года, т",
-        data: yearly.map(r => r.inventory_close),
-        tension: 0.2
-      }, {
-        label: "Требуемый резерв, т",
-        data: yearly.map(r => r.reserve_required),
-        tension: 0.2
-      }]
-    },
-    options: { responsive: true, maintainAspectRatio: false }
-  });
-
-  capexChart = new Chart($("capexChart"), {
-    type: "bar",
-    data: {
-      labels: costs.map(r => r.year),
-      datasets: [{
-        label: "CAPEX, млн у.е.",
-        data: costs.map(r => r.capex)
-      }]
-    },
-    options: { responsive: true, maintainAspectRatio: false }
-  });
-}
-
-function render(data) {
-  lastResult = data;
-
-  setStatus(data.feasible ? "Допустимый план" : "Есть нарушения",
-            data.feasible ? "ok" : "bad");
-
-  const meta = data.meta || {};
-  $("strategyBox").innerHTML = `
-    <strong>${meta.plan_name || meta.plan_id || "План двигателя"}</strong>
-    <div class="hint">
-      Сценарий: ${meta.scenario_name || meta.scenario_id || "—"} ·
-      engine: ${meta.engine_version || "—"} ·
-      горизонт: ${(meta.horizon || []).join("–")}
-    </div>
-  `;
-
-  renderKpis(data);
-  renderTable(data);
-  renderChecks(data);
-  renderCharts(data);
-
-  $("outputJson").textContent = JSON.stringify(data, null, 2);
-}
-
-async function calculate() {
-  try {
-    await loadChartJs();
-    const payload = buildPayload();
-    $("inputJson").textContent = JSON.stringify(payload, null, 2);
-    setStatus("Расчёт…", "warn");
-
-    const data = await api("/api/calculate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    render(data);
-  } catch (err) {
-    console.error(err);
-    setStatus("Ошибка", "bad");
-    $("planError").textContent = err.message;
-  }
-}
-
-function download(name, content, type) {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 500);
-}
-
-$("calcBtn").addEventListener("click", calculate);
-
-$("loadTemplate").addEventListener("click", () => {
-  if (!defaults) return;
-  $("planJson").value = JSON.stringify(defaults.plan_template, null, 2);
-  $("planError").textContent = "";
-});
-
-$("formatPlan").addEventListener("click", () => {
-  try {
-    $("planJson").value = JSON.stringify(JSON.parse($("planJson").value), null, 2);
-    $("planError").textContent = "";
-  } catch (err) {
-    $("planError").textContent = `Ошибка JSON: ${err.message}`;
-  }
-});
-
-$("downloadJson").addEventListener("click", () => {
-  if (lastResult) download(
-    "fuel_model_result.json",
-    JSON.stringify(lastResult, null, 2),
-    "application/json"
-  );
-});
-
-$("downloadCsv").addEventListener("click", () => {
-  if (!lastResult) return;
-  const rows = lastResult.yearly || [];
-  const header = [
-    "year", "demand_total", "demand_critical", "gross_inflow",
-    "losses", "served_total", "shortage_total",
-    "inventory_close", "reserve_required"
-  ];
-  const csv = [
-    header.join(";"),
-    ...rows.map(r => header.map(k => String(r[k] ?? "").replaceAll(";", ",")).join(";"))
-  ].join("\n");
-  download("fuel_model_yearly.csv", csv, "text/csv;charset=utf-8");
-});
-
-loadDefaults();
+$("loadTemplate").onclick=()=>loadPlan(defaults.plan_template);$("optimizeBtn").onclick=optimize;
+$("formatJson").onclick=()=>{try{$("planJson").value=JSON.stringify(JSON.parse($("planJson").value),null,2);msg("planMessage","JSON корректен","good")}catch(e){msg("planMessage","Ошибка JSON: "+e.message,"bad")}};
+$("applyJson").onclick=()=>{try{loadPlan(JSON.parse($("planJson").value));msg("planMessage","JSON применён","good");view("plan")}catch(e){msg("planMessage","Ошибка JSON: "+e.message,"bad")}};
+async function boot(){try{defaults=await api("/api/defaults");let h=await api("/api/health");$("connection").textContent="API: online";$("connection").className="status ok";$("engineInfo").textContent="engine "+h.engine_version;loadPlan(defaults.plan_template)}catch(e){$("connection").textContent="API: offline";$("connection").className="status bad";msg("planMessage","Не удалось подключиться к backend: "+e.message,"bad")}}boot();

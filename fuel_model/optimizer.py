@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from .engine import evaluate
+from .investments import build_investment_decision
 from .model import (
     Case,
     InitialStockLot,
@@ -93,53 +94,45 @@ class OptimizationResult:
         return sum(r.kpis["shortage_total"] for r in self.scenario_results.values())
 
 
-def _month_add(year: int, month: int, months: int) -> Tuple[int, int]:
-    """Добавить целое число месяцев к (year, month)."""
-    idx = year * 12 + (month - 1) + months
-    new_year, new_month = divmod(idx, 12)
-    return new_year, new_month + 1
+def _plan_has_supply_decisions(plan: Plan) -> bool:
+    """Есть ли в Plan явные решения по поставкам/запасу."""
+    if any(
+        float(value) > 1e-9
+        for by_year in plan.orders.values()
+        for value in by_year.values()
+    ):
+        return True
+    if any(
+        float(value) > 1e-9
+        for by_year in plan.reserved.values()
+        for value in by_year.values()
+    ):
+        return True
+    return any(float(lot.tons) > 1e-9 for lot in plan.initial_stock)
 
 
-def _investment_decision(case: Case, option_id: str) -> Optional[InvestmentDecision]:
-    """Строит самый ранний формально допустимый график CAPEX для опции."""
-    option = case.options[option_id]
-
-    stage_year = option.earliest_stage_year or case.first_year
-    latest_year = option.latest_capex_year or case.last_year
-    if stage_year > latest_year:
-        return None
-
-    stage_year = max(stage_year, case.first_year)
-    stage_dates = tuple((stage_year, 1) for _ in option.stage_amounts)
-    last_stage = stage_dates[-1] if stage_dates else (stage_year, 1)
-
-    build_months = (
-        option.max_build_months
-        if case.assumptions.lead_time_choice == "max"
-        else option.min_build_months
-    )
-    service_year, service_month = _month_add(
-        last_stage[0], last_stage[1], int(round(build_months))
-    )
-    if option.earliest_in_service_year is not None:
-        service_year = max(service_year, option.earliest_in_service_year)
-
-    if service_year < case.first_year:
-        service_year, service_month = case.first_year, 1
-    if service_year > case.last_year:
-        return None
-
-    return InvestmentDecision(
-        stage_dates=stage_dates,
-        in_service=(service_year, service_month),
-    )
+def _plan_has_decisions(plan: Plan) -> bool:
+    """Есть ли в Plan реальные решения, включая инвестиции."""
+    return bool(plan.investments) or _plan_has_supply_decisions(plan)
 
 
 def _investment_subsets(
     case: Case,
     config: OptimizerConfig,
+    fixed_option_ids: Optional[Sequence[str]] = None,
 ) -> Iterable[Tuple[str, ...]]:
-    """Перебирает комбинации инвестиций."""
+    """Перебрать комбинации инвестиций или явно выбранный Plan набор."""
+    if fixed_option_ids is not None:
+        selected = tuple(sorted(str(option_id) for option_id in fixed_option_ids))
+        unknown = sorted(set(selected) - set(case.options))
+        if unknown:
+            raise ValueError(
+                f"Plan содержит неизвестные инвестиции: {unknown}; "
+                f"доступны: {sorted(case.options)}"
+            )
+        yield selected
+        return
+
     ids = tuple(case.options)
     n = len(ids)
 
@@ -156,8 +149,12 @@ def _investment_subsets(
         yield ids
 
 
-def _investment_capex(case: Case, option_ids: Sequence[str]) -> Tuple[float, float]:
-    """Вернуть суммарный CAPEX и CAPEX до контрольного года для набора инвестиций."""
+def _investment_capex(
+    case: Case,
+    option_ids: Sequence[str],
+    decisions: Optional[Mapping[str, InvestmentDecision]] = None,
+) -> Tuple[float, float]:
+    """Вернуть суммарный CAPEX и CAPEX до контрольного года."""
     total = 0.0
     through_deadline = 0.0
     deadline = case.constraints.capex_cumulative_year
@@ -165,7 +162,11 @@ def _investment_capex(case: Case, option_ids: Sequence[str]) -> Tuple[float, flo
     for option_id in option_ids:
         option = case.options[option_id]
         total += option.total_capex
-        decision = _investment_decision(case, option_id)
+        decision = (
+            decisions[option_id]
+            if decisions is not None and option_id in decisions
+            else build_investment_decision(case, option_id)
+        )
         if decision is None:
             continue
         for stage_date, amount in zip(decision.stage_dates, option.stage_amounts):
@@ -198,12 +199,22 @@ def _with_investments(
     base_plan: Optional[Plan],
     case: Case,
     option_ids: Sequence[str],
+    preserve_existing: bool = False,
 ) -> Optional[Plan]:
     plan = copy.deepcopy(base_plan) if base_plan is not None else Plan("optimizer")
-    plan.investments = {}
 
+    if preserve_existing:
+        unknown = sorted(set(plan.investments) - set(case.options))
+        if unknown or set(plan.investments) != set(option_ids):
+            return None
+        # Явный график из Plan уже является решением пользователя.
+        # Канонический builder используется только для автоматически
+        # генерируемых инвестиционных кандидатов.
+        return plan
+
+    plan.investments = {}
     for option_id in option_ids:
-        decision = _investment_decision(case, option_id)
+        decision = build_investment_decision(case, option_id)
         if decision is None:
             return None
         plan.investments[option_id] = decision
@@ -1477,8 +1488,13 @@ def optimize(
     notes: List[str] = []
     candidate_summaries: List[CandidateSummary] = []
 
-    for option_ids in _investment_subsets(case, config):
-        capex_total, capex_through_deadline = _investment_capex(case, option_ids)
+    fixed_investments = tuple(base_plan.investments) if base_plan.investments else None
+    use_greedy_seed = not _plan_has_supply_decisions(base_plan)
+    for option_ids in _investment_subsets(case, config, fixed_investments):
+        fixed_decisions = base_plan.investments if fixed_investments is not None else None
+        capex_total, capex_through_deadline = _investment_capex(
+            case, option_ids, fixed_decisions
+        )
 
         if not _investment_subset_can_meet_loss_ceilings(
             case, option_ids, scenario_list
@@ -1498,7 +1514,12 @@ def optimize(
             )
             continue
 
-        seed = _with_investments(base_plan, case, option_ids)
+        seed = _with_investments(
+            base_plan,
+            case,
+            option_ids,
+            preserve_existing=fixed_investments is not None,
+        )
         if seed is None:
             candidate_summaries.append(
                 CandidateSummary(
@@ -1511,7 +1532,7 @@ def optimize(
             )
             continue
 
-        if initial_plan is None:
+        if use_greedy_seed:
             seed = _build_greedy_plan(
                 case,
                 seed,

@@ -1,0 +1,13 @@
+{
+  "plan_id": "synthetic-over-capacity",
+  "scenario_id": "SYNTHETIC",
+  "synthetic_source": {"source_id": "Source-X", "capacity_t_per_year": 10},
+  "decisions": {
+    "supply_orders": [],
+    "capacity_reservations": [
+      {"source_id": "Source-X", "year": 2035, "reserved_capacity_t": 12}
+    ],
+    "investments": [],
+    "inventory_policy": {}
+  }
+}

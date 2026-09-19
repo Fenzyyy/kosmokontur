@@ -8,6 +8,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from fuel_model.engine import ENGINE_VERSION
+from fuel_model.investments import build_investment_decision, decision_to_dict
 from fuel_model.loader import load_case
 from fuel_model.model import Plan
 from fuel_model.scenarios import get
@@ -67,7 +69,7 @@ def health():
         return {
             "ok": True,
             "engine": "fuel_model",
-            "engine_version": "0.1.0",
+            "engine_version": ENGINE_VERSION,
             "years": [c.first_year, c.last_year],
             "sources": [
                 {
@@ -75,6 +77,9 @@ def health():
                     "name": s.name,
                     "capacity": s.capacity,
                     "variable_cost": s.variable_cost,
+                    "reservation_rate": s.reservation_rate,
+                    "top_share": s.top_share,
+                    "requires_reservation": bool(s.reservation_rate or s.top_share),
                 }
                 for s in c.sources.values()
             ],
@@ -126,6 +131,11 @@ def defaults():
                     "stage_amounts": list(o.stage_amounts),
                     "capex": o.total_capex,
                     "earliest_in_service_year": o.earliest_in_service_year,
+                    "default_schedule": (
+                        decision_to_dict(decision)
+                        if (decision := build_investment_decision(c, o.option_id)) is not None
+                        else None
+                    ),
                 }
                 for o in c.options.values()
             ],

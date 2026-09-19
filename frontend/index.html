@@ -7,109 +7,35 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<main class="container">
-  <header class="hero">
-    <div>
-      <div class="eyebrow">КОСМОХАКАТОН 2026</div>
-      <h1>Экономическая стратегия топливной станции</h1>
-      <p class="lead">Интерфейс работает непосредственно с Python-движком <code>fuel_model</code>. Формулы в браузере не дублируются.</p>
-    </div>
-    <div id="connection" class="badge warn">Проверка API…</div>
-  </header>
-
-  <section class="card">
-    <div class="section-head">
-      <h2>Сценарий</h2>
-      <span class="hint">Параметры сценария передаются в engine без пересчёта на JS.</span>
-    </div>
-    <div class="grid3">
-      <label>Тип сценария
-        <select id="scenarioKind">
-          <option value="base">BASE</option>
-          <option value="stress">STRESS</option>
-        </select>
-      </label>
-      <label>Спрос
-        <select id="demandVariant">
-          <option value="base">Базовый</option>
-          <option value="low">Низкий</option>
-          <option value="high">Высокий</option>
-        </select>
-      </label>
-      <label>ISRU: доля поставки в стрессе
-        <input id="isruStressShare" type="text" inputmode="decimal" placeholder="0.50">
-      </label>
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="section-head">
-      <h2>План двигателя</h2>
-      <span class="hint">Это нативный JSON <code>Plan</code> из fuel_model. Его можно редактировать вручную.</span>
-    </div>
-
-    <div class="toolbar">
-      <button type="button" id="loadTemplate" class="secondary">Загрузить шаблон</button>
-      <button type="button" id="formatPlan" class="secondary">Форматировать JSON</button>
-      <button type="button" id="calcBtn" class="primary">Рассчитать</button>
-    </div>
-
-    <textarea id="planJson" class="code-editor" spellcheck="false"></textarea>
-    <div id="planError" class="field-error"></div>
-  </section>
-
-  <section class="card">
-    <div class="section-head">
-      <h2>Результат</h2>
-      <div id="status"></div>
-    </div>
-
-    <div id="kpis" class="kpis"></div>
-    <div id="strategyBox" class="strategy-box">Нажмите «Рассчитать».</div>
-
-    <div class="charts-grid">
-      <div class="chart-card">
-        <h3>Запас топлива</h3>
-        <div class="chart-wrap"><canvas id="fuelChart"></canvas></div>
-      </div>
-      <div class="chart-card">
-        <h3>CAPEX по годам</h3>
-        <div class="chart-wrap"><canvas id="capexChart"></canvas></div>
-      </div>
-    </div>
-
-    <div class="toolbar">
-      <button type="button" id="downloadJson" class="secondary">Скачать JSON результата</button>
-      <button type="button" id="downloadCsv" class="secondary">Скачать CSV по годам</button>
-    </div>
-
-    <div class="table-wrap">
-      <table id="resultTable">
-        <thead></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="grid2">
-    <div class="card">
-      <h2>Ограничения</h2>
-      <div id="checks"></div>
-    </div>
-    <div class="card">
-      <h2>Нарушения</h2>
-      <div id="violations"></div>
-    </div>
-  </section>
-
-  <details class="card">
-    <summary>JSON входа</summary>
-    <pre id="inputJson"></pre>
-  </details>
-  <details class="card">
-    <summary>JSON результата</summary>
-    <pre id="outputJson"></pre>
-  </details>
+<div class="shell">
+<header class="topbar"><div><div class="eyebrow">КОСМОХАКАТОН 2026 · FUEL MODEL</div><h1>Топливный космоконтур</h1><p>Операторский интерфейс для планирования поставок, инвестиций и проверки BASE / MANDATORY STRESS.</p></div><div id="connection" class="status warn">API: проверка…</div></header>
+<nav class="tabs"><button class="tab active" data-view="plan">Plan</button><button class="tab" data-view="dashboard">Dashboard</button><button class="tab" data-view="frontier">Investment frontier</button><button class="tab" data-view="advanced">Advanced / JSON</button></nav>
+<main>
+<section id="view-plan" class="view active">
+<div class="section-title"><div><span class="eyebrow">01 · DECISION</span><h2>План оператора</h2></div><div class="actions"><button id="loadTemplate">Сбросить</button><button id="optimizeBtn" class="primary">Запустить оптимизацию</button></div></div>
+<div id="planMessage" class="message"></div>
+<section class="card"><div class="card-head"><div><h3>Годовые поставки</h3><span>Объём заказа по каждому каналу, т.</span></div><span id="yearRange" class="pill">—</span></div><div id="ordersEditor" class="table-scroll"></div></section>
+<div class="two-col">
+<section class="card"><div class="card-head"><div><h3>Резерв мощности</h3><span>Для каналов с reservation / take-or-pay.</span></div></div><div id="reserveEditor" class="table-scroll"></div></section>
+<section class="card"><div class="card-head"><div><h3>Инвестиции</h3><span>Выберите опции, которые должен рассмотреть план.</span></div></div><div id="investmentEditor" class="investment-list"></div></section>
+</div>
+<section class="card"><div class="card-head"><div><h3>Начальный запас</h3><span>Физический запас в узле на начало горизонта.</span></div></div><div id="stockEditor" class="stock-list"></div></section>
+<section class="card scenario-card"><div class="card-head"><div><h3>Сценарии</h3><span>BASE — контрольный; MANDATORY STRESS — обязательная проверка.</span></div></div><div class="scenario-grid"><label class="check"><input type="checkbox" checked disabled><span>BASE</span></label><label class="check"><input id="stressScenario" type="checkbox" checked><span>MANDATORY STRESS</span></label></div></section>
+</section>
+<section id="view-dashboard" class="view">
+<div class="section-title"><div><span class="eyebrow">02 · RESULT</span><h2>Dashboard</h2></div><div class="scenario-switch"><button class="scenario-btn active" data-scenario="BASE">BASE</button><button class="scenario-btn" data-scenario="MANDATORY_STRESS">STRESS</button></div></div>
+<div id="resultMessage" class="message"></div><div id="dashboardContent" class="dashboard-empty"><div class="empty-icon">◎</div><h3>Результат ещё не рассчитан</h3><p>Перейдите в Plan и запустите оптимизацию.</p></div>
+</section>
+<section id="view-frontier" class="view">
+<div class="section-title"><div><span class="eyebrow">03 · INVESTMENT SPACE</span><h2>Investment frontier</h2></div></div>
+<section class="card"><div class="card-head"><div><h3>CAPEX ↔ service level</h3><span>Каждая точка — инвестиционный кандидат, проверенный через fuel_model.</span></div></div><div class="chart-large"><div id="frontierChart" class="svg-chart"></div></div></section>
+<section class="card"><div class="card-head"><div><h3>Кандидаты</h3><span>Отмечен выбранный оптимизатором вариант.</span></div></div><div id="frontierTable" class="table-scroll"></div></section>
+</section>
+<section id="view-advanced" class="view">
+<div class="section-title"><div><span class="eyebrow">04 · DEBUG</span><h2>Advanced / JSON</h2></div><div class="actions"><button id="formatJson">Форматировать</button><button id="applyJson" class="primary">Применить JSON</button></div></div>
+<section class="card"><div class="card-head"><div><h3>Plan JSON</h3><span>Нативный контракт Plan.from_dict().</span></div></div><textarea id="planJson" class="json-editor" spellcheck="false"></textarea></section>
+<section class="card"><div class="card-head"><div><h3>Последний Result JSON</h3><span>Для отладки и экспорта.</span></div></div><pre id="resultJson">—</pre></section>
+</section>
 </main>
 
 <script>

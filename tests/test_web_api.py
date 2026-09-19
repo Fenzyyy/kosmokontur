@@ -1,0 +1,325 @@
+from __future__ import annotations
+
+from fastapi.testclient import TestClient
+
+from backend.api import app, case
+from fuel_model.engine import ENGINE_VERSION
+from fuel_model.investments import build_investment_decision, decision_to_dict
+from fuel_model.optimizer import _plan_has_decisions, optimize
+from fuel_model.model import Plan
+from fuel_model.scenarios import get
+
+
+client = TestClient(app)
+
+
+def test_health_and_defaults_load_real_case():
+    health = client.get("/api/health")
+    assert health.status_code == 200
+    body = health.json()
+    assert body["ok"] is True
+    assert body["engine_version"] == ENGINE_VERSION
+    assert body["years"] == [2035, 2040]
+    assert {s["id"] for s in body["sources"]} == {"A", "B", "C", "D", "E"}
+
+    defaults = client.get("/api/defaults")
+    assert defaults.status_code == 200
+    data = defaults.json()
+    assert data["years"] == [2035, 2036, 2037, 2038, 2039, 2040]
+    assert set(data["plan_template"]["orders"]) == {"A", "B", "C", "D", "E"}
+    assert {x["id"] for x in data["investments"]} == {"EARTH_NEW", "LUNAR_ISRU", "ZBO"}
+    assert {x["scenario_id"] for x in data["scenarios"]} == {"BASE", "MANDATORY_STRESS"}
+
+
+def test_calculate_round_trip_with_real_case():
+    defaults = client.get("/api/defaults").json()
+    response = client.post(
+        "/api/calculate",
+        json={"plan": defaults["plan_template"], "scenario_id": "BASE"},
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["meta"]["scenario_id"] == "BASE"
+    assert len(result["yearly"]) == 6
+    assert len(result["costs"]) == 6
+    assert "shortage_total" in result["kpis"]
+    assert "violations" in result
+
+
+def test_optimize_round_trip_base_and_stress():
+    defaults = client.get("/api/defaults").json()
+    response = client.post(
+        "/api/optimize",
+        json={
+            "plan": defaults["plan_template"],
+            "scenario_ids": ["BASE", "MANDATORY_STRESS"],
+            "run_frontier": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+    assert set(data["scenarios"]) == {"BASE", "MANDATORY_STRESS"}
+    assert isinstance(data["plan"], dict)
+    assert "orders" in data["plan"]
+    assert "investments" in data["plan"]
+    assert isinstance(data["frontier"], list)
+    assert data["candidates_checked"] > 0
+
+    for scenario_id in ("BASE", "MANDATORY_STRESS"):
+        result = data["scenarios"][scenario_id]
+        assert "feasible" in result
+        assert len(result["yearly"]) == 6
+        assert len(result["costs"]) == 6
+        assert "kpis" in result
+        assert "violations" in result
+
+    selected = [p for p in data["frontier"] if p.get("selected")]
+    assert len(selected) <= 1
+
+
+def test_investment_schedule_is_shared_by_api_and_optimizer():
+    c = case()
+    defaults = client.get("/api/defaults").json()
+    api_investments = {item["id"]: item for item in defaults["investments"]}
+
+    for option_id in c.options:
+        expected = build_investment_decision(c, option_id)
+        expected_payload = decision_to_dict(expected) if expected is not None else None
+        assert api_investments[option_id]["default_schedule"] == expected_payload
+
+    result = optimize(
+        c,
+        [get("BASE")],
+        initial_plan=Plan.from_dict(defaults["plan_template"]),
+    )
+    for option_id, decision in result.plan.investments.items():
+        assert decision_to_dict(decision) == api_investments[option_id]["default_schedule"]
+
+
+def test_explicit_investments_are_preserved_by_optimizer():
+    defaults = client.get("/api/defaults").json()
+    schedule = next(x["default_schedule"] for x in defaults["investments"] if x["id"] == "EARTH_NEW")
+    plan = Plan.from_dict(defaults["plan_template"])
+    plan.investments = {"EARTH_NEW": build_investment_decision(case(), "EARTH_NEW")}
+
+    result = optimize(case(), [get("BASE")], initial_plan=plan)
+
+    assert set(result.plan.investments) == {"EARTH_NEW"}
+    assert decision_to_dict(result.plan.investments["EARTH_NEW"]) == schedule
+    assert len(result.candidate_summaries) == 1
+
+
+def test_zero_ui_template_is_treated_as_empty_plan():
+    defaults = client.get("/api/defaults").json()
+    template = Plan.from_dict(defaults["plan_template"])
+    assert _plan_has_decisions(template) is False
+
+    template.orders["A"][2035] = 1.0
+    assert _plan_has_decisions(template) is True
+
+
+def test_frontend_assets_are_served_by_fastapi():
+    index = client.get("/")
+    assert index.status_code == 200
+    assert "Kosmokontur" in index.text
+
+    app_js = client.get("/app.js")
+    styles = client.get("/styles.css")
+    assert app_js.status_code == 200
+    assert styles.status_code == 200
+
+
+def test_fixed_investment_still_allows_optimizer_to_build_supply_plan():
+    defaults = client.get("/api/defaults").json()
+    plan = Plan.from_dict(defaults["plan_template"])
+    plan.investments = {"EARTH_NEW": build_investment_decision(case(), "EARTH_NEW")}
+
+    result = optimize(case(), [get("BASE")], initial_plan=plan)
+
+    total_order = sum(
+        float(value)
+        for by_year in result.plan.orders.values()
+        for value in by_year.values()
+    )
+    assert total_order > 0.0
+
+
+def test_free_capacity_source_ignores_explicit_zero_reserve():
+    c = case()
+    plan = Plan("reserve-test", reserved={"D": {2035: 0.0}})
+    assert plan.reserved_capacity(c.sources["D"], 2035) == c.sources["D"].capacity
+
+
+def test_api_preserves_explicit_investment_schedule_end_to_end():
+    defaults = client.get("/api/defaults").json()
+    earth_new = next(x for x in defaults["investments"] if x["id"] == "EARTH_NEW")
+    plan = Plan.from_dict(defaults["plan_template"])
+    plan.investments = {
+        "EARTH_NEW": build_investment_decision(case(), "EARTH_NEW")
+    }
+
+    response = client.post(
+        "/api/optimize",
+        json={
+            "plan": plan.to_dict(),
+            "scenario_ids": ["BASE"],
+            "run_frontier": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert set(data["plan"]["investments"]) == {"EARTH_NEW"}
+    assert data["plan"]["investments"]["EARTH_NEW"] == earth_new["default_schedule"]
+    assert len(data["frontier"]) == 1
+
+
+def test_user_plan_round_trip_preserves_all_plan_sections():
+    c = case()
+    earth_new = build_investment_decision(c, "EARTH_NEW")
+    plan = Plan(
+        "user-plan",
+        name="Проверка пользовательского ввода",
+        orders={
+            "A": {2035: 50.0, 2036: 55.0},
+            "B": {2035: 20.0},
+        },
+        reserved={
+            "A": {2035: 60.0, 2036: 65.0},
+            "B": {2035: 25.0},
+        },
+        initial_stock=[],
+        investments={"EARTH_NEW": earth_new},
+    )
+
+    encoded = plan.to_dict()
+    decoded = Plan.from_dict(encoded)
+    assert decoded.to_dict() == encoded
+
+    response = client.post(
+        "/api/calculate",
+        json={"plan": encoded, "scenario_id": "BASE"},
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["meta"]["plan_id"] == "user-plan"
+    assert result["meta"]["scenario_id"] == "BASE"
+    assert len(result["yearly"]) == len(c.years)
+    assert len(result["costs"]) == len(c.years)
+
+
+def test_user_plan_optimizer_returns_same_contract_shape():
+    c = case()
+    plan = Plan(
+        "user-plan",
+        orders={"A": {2035: 50.0}, "B": {2035: 20.0}},
+        reserved={"A": {2035: 60.0}, "B": {2035: 25.0}},
+        investments={"EARTH_NEW": build_investment_decision(c, "EARTH_NEW")},
+    )
+
+    response = client.post(
+        "/api/optimize",
+        json={
+            "plan": plan.to_dict(),
+            "scenario_ids": ["BASE"],
+            "run_frontier": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    returned_plan = data["plan"]
+    assert set(returned_plan) >= {
+        "plan_id",
+        "name",
+        "notes",
+        "orders",
+        "reserved",
+        "initial_stock",
+        "investments",
+    }
+    assert set(returned_plan["investments"]) == {"EARTH_NEW"}
+    assert "2035" in returned_plan["orders"]["A"]
+    assert "2035" in returned_plan["reserved"]["A"]
+
+
+def test_frontier_endpoint_returns_generic_scenario_metrics():
+    defaults = client.get("/api/defaults").json()
+    response = client.post(
+        "/api/frontier",
+        json={
+            "plan": defaults["plan_template"],
+            "scenario_ids": ["BASE", "LOW_DEMAND"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert set(data["scenarios"]) == {"BASE", "LOW_DEMAND"}
+    assert isinstance(data["points"], list)
+    if data["points"]:
+        assert "scenario_metrics" in data["points"][0]
+        assert "BASE" in data["points"][0]["scenario_metrics"]
+
+
+def test_api_rejects_invalid_scenario_and_plan():
+    defaults = client.get("/api/defaults").json()
+
+    bad_scenario = client.post(
+        "/api/calculate",
+        json={"plan": defaults["plan_template"], "scenario_id": "UNKNOWN"},
+    )
+    assert bad_scenario.status_code == 400
+
+    bad_plan = client.post(
+        "/api/calculate",
+        json={
+            "plan": {
+                **defaults["plan_template"],
+                "orders": {"UNKNOWN_SOURCE": {"2035": 1.0}},
+            },
+            "scenario_id": "BASE",
+        },
+    )
+    assert bad_plan.status_code == 400
+
+    bad_scenario_list = client.post(
+        "/api/optimize",
+        json={
+            "plan": defaults["plan_template"],
+            "scenario_ids": [],
+        },
+    )
+    assert bad_scenario_list.status_code == 422
+
+    bad_frontier_scenario_list = client.post(
+        "/api/frontier",
+        json={
+            "plan": defaults["plan_template"],
+            "scenario_ids": [],
+        },
+    )
+    assert bad_frontier_scenario_list.status_code == 422
+
+
+def test_canonical_investment_schedule_dates_for_real_case():
+    c = case()
+    expected = {
+        "EARTH_NEW": {
+            "stage_dates": ["2035-01", "2035-01"],
+            "in_service": "2037-01",
+        },
+        "LUNAR_ISRU": {
+            "stage_dates": ["2035-01"],
+            "in_service": "2038-01",
+        },
+        "ZBO": {
+            "stage_dates": ["2036-01"],
+            "in_service": "2036-01",
+        },
+    }
+
+    actual = {
+        option_id: decision_to_dict(build_investment_decision(c, option_id))
+        for option_id in expected
+    }
+    assert actual == expected

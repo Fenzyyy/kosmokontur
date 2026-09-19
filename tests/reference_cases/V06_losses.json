@@ -1,0 +1,12 @@
+{
+  "case_id": "V06",
+  "source": "SpaceEconomyPolicy/test_oil:validation/control_cases.md",
+  "description": "Потери начисляются на throughput один раз",
+  "inputs": {
+    "gross_inflow_t": 20,
+    "loss_rate": 0.05
+  },
+  "expected": {
+    "losses_t": 1
+  }
+}
