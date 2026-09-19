@@ -806,7 +806,11 @@ def optimize(
             best_score = score
 
     if best_plan is None or best_results is None or best_score is None:
-        raise RuntimeError("Оптимизатор не смог построить ни одного кандидата")
+        diagnostic = " | ".join(notes[-12:]) if notes else "нет диагностических сообщений"
+        raise RuntimeError(
+            "Оптимизатор не смог построить ни одного кандидата. "
+            f"Диагностика: {diagnostic}"
+        )
 
     if all(r.feasible for r in best_results.values()):
         notes.append("Найден план без HARD-нарушений.")
