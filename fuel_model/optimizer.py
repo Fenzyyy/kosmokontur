@@ -621,9 +621,16 @@ def _repair_reserve(
                         remaining.append(
                             f"{result.meta['scenario_id']}:{row['year']}={gap:.2f}t"
                         )
+            order_state = "; ".join(
+                f"{sid}:{build_year}={current.order(sid, build_year):.1f}"
+                for sid in case.sources
+                for build_year in case.years
+                if build_year <= year
+            )
             diagnostics.append(
                 f"reserve repair stalled at year {year}; "
-                f"remaining={', '.join(remaining[:10])}"
+                f"remaining={', '.join(remaining[:10])}; "
+                f"orders={order_state}"
             )
             break
 
