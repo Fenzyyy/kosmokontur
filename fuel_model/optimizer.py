@@ -368,6 +368,166 @@ def _evaluate_all(
 
 
 
+def _reserve_is_feasible(results: Mapping[str, Result]) -> bool:
+    """Проверить физический 45-дневный резерв во всех сценариях."""
+    return not any(
+        v.code == "RESERVE_45D_SHORT" and v.severity == "HARD"
+        for result in results.values()
+        for v in result.violations
+    )
+
+
+def _repair_reserve(
+    case: Case,
+    seed: Plan,
+    scenarios: Sequence[Scenario],
+    config: OptimizerConfig,
+) -> Tuple[Plan, Dict[str, Result], Tuple[float, ...], int]:
+    """Добрать 45-дневный физический резерв минимальным увеличением поставок.
+
+    Резерв на 1 января года y формируется запасом на конец y-1.
+    Поэтому для y>first_year увеличиваем поставки предыдущего года.
+    Для первого года корректируем initial_stock, не допуская превышения
+    базовой ёмкости.
+    """
+    current = copy.deepcopy(seed)
+    iterations = 0
+    max_repairs = max(1, len(case.years) * len(case.sources) * 2)
+
+    for _ in range(max_repairs):
+        results, score = _evaluate_all(case, current, scenarios)
+        if _reserve_is_feasible(results):
+            return current, results, score, iterations
+
+        # Берём первый год с максимальным физическим недобором.
+        shortages = []
+        for result in results.values():
+            for row in result.yearly:
+                gap = max(0.0, row["reserve_required"] - row["reserve_stock_at_check"])
+                if gap > 1e-8:
+                    shortages.append((gap, row["year"], result.meta["scenario_id"]))
+
+        if not shortages:
+            return current, results, score, iterations
+
+        _, year, _ = max(shortages, key=lambda x: (x[0], -x[1]))
+
+        if year == case.first_year:
+            required = max(
+                case.demand_series(
+                    scenario.demand_variant,
+                    scenario.demand_multiplier,
+                )[year][0]
+                * case.constraints.reserve_days
+                / 365.0
+                for scenario in scenarios
+            )
+            capacity = case.storage[case.base_storage_id].capacity
+            current_total = sum(lot.tons for lot in current.initial_stock)
+            target = min(required, capacity)
+
+            if target <= current_total + 1e-9:
+                break
+
+            # Расширяем уже существующие/доступные initial-stock lots.
+            res = resolve(case, current)
+            candidates = []
+            for sid, source in case.sources.items():
+                avail = res.avail_day[sid]
+                if avail is not None and avail <= 0:
+                    candidates.append((source.variable_cost + source.reservation_rate, sid))
+
+            candidates.sort()
+            added = target - current_total
+            for _, sid in candidates:
+                room = max(0.0, case.sources[sid].capacity -
+                           sum(l.tons for l in current.initial_stock if l.source_id == sid))
+                take = min(added, room)
+                if take <= 1e-9:
+                    continue
+                current.initial_stock.append(InitialStockLot(sid, take))
+                added -= take
+                if added <= 1e-9:
+                    break
+
+            iterations += 1
+            continue
+
+        prev_year = year - 1
+
+        # Сначала рассматриваем физически доступные каналы предыдущего года.
+        res = resolve(case, current)
+        source_candidates = []
+        for sid, source in case.sources.items():
+            frac = res.cal.fraction_available(prev_year, res.avail_day[sid])
+            current_order = current.order(sid, prev_year)
+            max_order = source.capacity * frac
+            room = max(0.0, max_order - current_order)
+            if frac > 1e-12 and room > 1e-9:
+                source_candidates.append(
+                    (
+                        source.variable_cost + source.reservation_rate,
+                        sid,
+                        room,
+                    )
+                )
+
+        source_candidates.sort(key=lambda x: (x[0], x[1]))
+
+        repaired = False
+        for _, sid, room in source_candidates:
+            lo = 0.0
+            hi = room
+
+            trial_zero = copy.deepcopy(current)
+            trial_zero_order = current.order(sid, prev_year)
+            _set_order(case, trial_zero, sid, prev_year, trial_zero_order + hi)
+            high_results, _ = _evaluate_all(case, trial_zero, scenarios)
+
+            # Если даже полный оставшийся ресурс не даёт резерв,
+            # пробуем следующий канал.
+            if not _reserve_is_feasible(high_results):
+                continue
+
+            # Ищем минимальную добавку, которая делает весь набор сценариев
+            # физически резервно-совместимым и не создаёт overflow.
+            for _ in range(24):
+                mid = (lo + hi) / 2.0
+                trial = copy.deepcopy(current)
+                _set_order(
+                    case,
+                    trial,
+                    sid,
+                    prev_year,
+                    current_order + mid,
+                )
+                trial_results, _ = _evaluate_all(case, trial, scenarios)
+
+                if _reserve_is_feasible(trial_results) and _storage_is_feasible(trial_results):
+                    hi = mid
+                else:
+                    lo = mid
+
+            trial = copy.deepcopy(current)
+            _set_order(case, trial, sid, prev_year, current_order + hi)
+            trial_results, trial_score = _evaluate_all(case, trial, scenarios)
+
+            if _reserve_is_feasible(trial_results) and _storage_is_feasible(trial_results):
+                current = trial
+                iterations += 1
+                repaired = True
+                break
+
+        if not repaired:
+            # Теоретически резерв может быть физически неисполняем,
+            # тогда сохраняем лучший найденный кандидат и даём engine
+            # явно сообщить о нарушении.
+            break
+
+    results, score = _evaluate_all(case, current, scenarios)
+    return current, results, score, iterations
+
+
 def _storage_overflow_excess(results: Mapping[str, Result]) -> float:
     """Суммарное физическое переполнение хранения по всем сценариям."""
     return sum(
@@ -510,10 +670,18 @@ def _local_search(
     config: OptimizerConfig,
 ) -> Tuple[Plan, Dict[str, Result], Tuple[float, ...], int]:
     """Coordinate descent по годовым заказам."""
-    current, results, current_score, repair_iterations = _repair_storage_overflow(
+    current, results, current_score, reserve_iterations = _repair_reserve(
         case, seed, scenarios, config
     )
-    iterations = repair_iterations
+    current, results, current_score, storage_iterations = _repair_storage_overflow(
+        case, current, scenarios, config
+    )
+    # После storage-repair повторно восстанавливаем только тот резерв,
+    # который был потерян из-за физического ограничения ёмкости.
+    current, results, current_score, reserve_repair_iterations = _repair_reserve(
+        case, current, scenarios, config
+    )
+    iterations = reserve_iterations + storage_iterations + reserve_repair_iterations
 
     for _ in range(config.max_local_search_passes):
         improved = False
@@ -622,6 +790,13 @@ def optimize(
             notes.append(
                 f"Кандидат с инвестициями {option_ids} отклонён: "
                 "осталось переполнение storage."
+            )
+            continue
+
+        if not _reserve_is_feasible(results):
+            notes.append(
+                f"Кандидат с инвестициями {option_ids} отклонён: "
+                "не выполнен 45-дневный физический резерв."
             )
             continue
 
