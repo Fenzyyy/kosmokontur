@@ -171,6 +171,11 @@ def _set_order(
     if source.reservation_rate == 0 and source.top_share == 0:
         # Plan.reserved_capacity() автоматически вернёт полную мощность.
         if source_id in plan.reserved:
+            # Emergency может иметь отдельный контрактный резерв даже при
+            # нулевом фактическом заказе; остальные источники резерв заказа
+            # можно безопасно удалить.
+            if source_id == case.constraints.emergency_source_id:
+                return
             plan.reserved[source_id].pop(year, None)
             if not plan.reserved[source_id]:
                 plan.reserved.pop(source_id, None)
@@ -178,14 +183,25 @@ def _set_order(
 
     res = resolve(case, plan)
     frac = res.cal.fraction_available(year, res.avail_day[source_id])
-    if frac <= 1e-12 or order <= 1e-9:
+    if frac <= 1e-12:
+        return
+
+    existing_reserved = plan.reserved.get(source_id, {}).get(year, 0.0)
+
+    if order <= 1e-9:
+        # Для Emergency сохраняем отдельно заключённый контрактный резерв.
+        if source_id == case.constraints.emergency_source_id:
+            return
         if source_id in plan.reserved:
             plan.reserved[source_id].pop(year, None)
             if not plan.reserved[source_id]:
                 plan.reserved.pop(source_id, None)
         return
 
-    reserved = min(source.capacity, order / frac)
+    reserved_for_order = min(source.capacity, order / frac)
+    # Изменение фактического Emergency-заказа не должно уменьшать уже
+    # заключённый контрактный резерв.
+    reserved = max(existing_reserved, reserved_for_order)
     plan.reserved.setdefault(source_id, {})[year] = reserved
 
 
