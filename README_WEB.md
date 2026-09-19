@@ -6,8 +6,10 @@ Architecture: frontend -> FastAPI -> backend services -> fuel_model.
 
 Main endpoints: /api/health, /api/defaults, /api/calculate, /api/optimize, /api/frontier.
 
-Local launch: pip install -r backend/requirements.txt && uvicorn backend.api:app --reload
+Local launch (Windows): double-click `start_local.bat`.
 
-Open http://localhost:8000.
+Local launch (any OS): `python -m pip install -r backend/requirements.txt` then `python run_local.py`.
+
+Open http://127.0.0.1:8000. The application does not require an internet connection at runtime: frontend charts are rendered with native SVG and the calculation engine runs locally.
 
 The frontend provides visual Plan editing, BASE/STRESS dashboard, investment frontier and Advanced JSON mode.
