@@ -149,3 +149,26 @@ def test_free_capacity_source_ignores_explicit_zero_reserve():
     c = case()
     plan = Plan("reserve-test", reserved={"D": {2035: 0.0}})
     assert plan.reserved_capacity(c.sources["D"], 2035) == c.sources["D"].capacity
+
+
+def test_api_preserves_explicit_investment_schedule_end_to_end():
+    defaults = client.get("/api/defaults").json()
+    earth_new = next(x for x in defaults["investments"] if x["id"] == "EARTH_NEW")
+    plan = Plan.from_dict(defaults["plan_template"])
+    plan.investments = {
+        "EARTH_NEW": build_investment_decision(case(), "EARTH_NEW")
+    }
+
+    response = client.post(
+        "/api/optimize",
+        json={
+            "plan": plan.to_dict(),
+            "scenario_ids": ["BASE"],
+            "run_frontier": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert set(data["plan"]["investments"]) == {"EARTH_NEW"}
+    assert data["plan"]["investments"]["EARTH_NEW"] == earth_new["default_schedule"]
+    assert len(data["frontier"]) == 1
