@@ -77,6 +77,9 @@ def health():
                     "name": s.name,
                     "capacity": s.capacity,
                     "variable_cost": s.variable_cost,
+                    "reservation_rate": s.reservation_rate,
+                    "top_share": s.top_share,
+                    "requires_reservation": bool(s.reservation_rate or s.top_share),
                 }
                 for s in c.sources.values()
             ],
