@@ -1,10 +1,9 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Топливный космоконтур 2035 — расчёт</title>
-  <link rel="stylesheet" href="styles.css">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kosmokontur — Fuel Infrastructure Optimizer</title>
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <div class="shell">
@@ -17,7 +16,7 @@
 <section class="card"><div class="card-head"><div><h3>Годовые поставки</h3><span>Объём заказа по каждому каналу, т.</span></div><span id="yearRange" class="pill">—</span></div><div id="ordersEditor" class="table-scroll"></div></section>
 <div class="two-col">
 <section class="card"><div class="card-head"><div><h3>Резерв мощности</h3><span>Для каналов с reservation / take-or-pay.</span></div></div><div id="reserveEditor" class="table-scroll"></div></section>
-<section class="card"><div class="card-head"><div><h3>Инвестиции</h3><span>Выберите опции, которые должен рассмотреть план.</span></div></div><div id="investmentEditor" class="investment-list"></div></section>
+<section class="card"><div class="card-head"><div><h3>Инвестиции</h3><span>Выберите опции, которые войдут в Plan. Если ничего не выбрано, оптимизатор перебирает все допустимые комбинации.</span></div></div><div id="investmentEditor" class="investment-list"></div></section>
 </div>
 <section class="card"><div class="card-head"><div><h3>Начальный запас</h3><span>Физический запас в узле на начало горизонта.</span></div></div><div id="stockEditor" class="stock-list"></div></section>
 <section class="card scenario-card"><div class="card-head"><div><h3>Сценарии</h3><span>BASE — контрольный; MANDATORY STRESS — обязательная проверка.</span></div></div><div class="scenario-grid"><label class="check"><input type="checkbox" checked disabled><span>BASE</span></label><label class="check"><input id="stressScenario" type="checkbox" checked><span>MANDATORY STRESS</span></label></div></section>
@@ -37,10 +36,7 @@
 <section class="card"><div class="card-head"><div><h3>Последний Result JSON</h3><span>Для отладки и экспорта.</span></div></div><pre id="resultJson">—</pre></section>
 </section>
 </main>
-
-<script>
-  window.ENGINE_API_URL = window.ENGINE_API_URL || ((location.protocol === "http:" || location.protocol === "https:") ? location.origin : "http://localhost:8000");
-</script>
-<script src="app.js" defer></script>
-</body>
-</html>
+<footer><span>fuel_model → FastAPI → browser</span><span id="engineInfo">engine —</span></footer>
+</div>
+<script src="app.js"></script>
+</body></html>
