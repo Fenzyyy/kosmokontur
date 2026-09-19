@@ -1,7 +1,7 @@
 """Интеграционные тесты эвристического optimizer на синтетическом кейсе."""
 import unittest
 
-from .model import Case, Constraints, DemandRow, Source, StorageMode
+from .model import Case, Constraints, DemandRow, Plan, Source, StorageMode
 from .optimizer import OptimizerConfig, optimize
 from .scenarios import base
 
@@ -42,7 +42,7 @@ class OptimizerSmoke(unittest.TestCase):
                 )
             },
             options={},
-            constraints=Constraints(),
+            constraints=Constraints(reserve_days=0.0),
         )
 
     def test_optimizer_finds_feasible_plan(self):
@@ -61,6 +61,32 @@ class OptimizerSmoke(unittest.TestCase):
             result.scenario_results["BASE"].kpis["shortage_critical"], 0.0, places=8
         )
         self.assertGreater(result.candidates_checked, 0)
+
+    def test_optimizer_never_returns_storage_overflow(self):
+        seed = Plan(
+            "overflow-seed",
+            orders={"X": {2035: 100.0}},
+        )
+
+        result = optimize(
+            self.case,
+            [base()],
+            initial_plan=seed,
+            config=OptimizerConfig(
+                max_local_search_passes=3,
+                step_fraction_of_capacity=0.10,
+                min_step_tons=10.0,
+            ),
+        )
+
+        storage_violations = [
+            v
+            for v in result.scenario_results["BASE"].violations
+            if v.code in ("STORAGE_OVERFLOW", "INITIAL_STOCK_EXCEEDS_STORAGE")
+        ]
+
+        self.assertEqual(storage_violations, [])
+        self.assertEqual(result.scenario_results["BASE"].kpis["hard_violations"], 0)
 
     def test_optimizer_is_deterministic(self):
         config = OptimizerConfig(max_local_search_passes=2)
