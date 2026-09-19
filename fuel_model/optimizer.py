@@ -402,7 +402,7 @@ def _repair_storage_overflow(
     scenarios: Sequence[Scenario],
     config: OptimizerConfig,
 ) -> Tuple[Plan, Dict[str, Result], Tuple[float, ...], int]:
-    """Устранить физическое переполнение storage до локального поиска."""
+    """Устранить физическое переполнение storage с минимальным снижением заказов."""
     current = copy.deepcopy(seed)
     _clip_initial_stock_to_storage(case, current)
     repair_iterations = 0
@@ -428,11 +428,14 @@ def _repair_storage_overflow(
 
         year = max(overflow_by_year, key=overflow_by_year.get)
 
+        # Источник с наибольшей фактической поставкой в проблемном году
+        # даёт максимальный эффект от небольшого уменьшения заказа.
         candidates = []
         for sid in case.sources:
             order = current.order(sid, year)
             if order <= 1e-9:
                 continue
+
             actual_delivery = 0.0
             for result in results.values():
                 for row in result.yearly:
@@ -441,6 +444,7 @@ def _repair_storage_overflow(
                             actual_delivery,
                             float(row["sources"][sid]["actual_delivery"]),
                         )
+
             if actual_delivery > 1e-9:
                 candidates.append((actual_delivery, order, sid))
 
@@ -448,24 +452,47 @@ def _repair_storage_overflow(
             break
 
         _, order, sid = max(candidates, key=lambda item: (item[0], item[1]))
-        source = case.sources[sid]
-        step = max(
-            config.min_step_tons,
-            config.step_fraction_of_capacity * source.capacity,
-        )
-        new_order = max(0.0, order - step)
 
-        trial = copy.deepcopy(current)
-        _set_order(case, trial, sid, year, new_order)
-        if abs(trial.order(sid, year) - order) <= 1e-12:
+        # Для фиксированных остальных заказов storage monotonic по заказу
+        # конкретного источника: меньше заказ -> не больше запаса.
+        zero_plan = copy.deepcopy(current)
+        _set_order(case, zero_plan, sid, year, 0.0)
+        zero_results, _ = _evaluate_all(case, zero_plan, scenarios)
+
+        if not _storage_is_feasible(zero_results):
+            # Даже полное снятие этого заказа не устраняет overflow:
+            # переходим к следующему наиболее влияющему источнику.
+            current = zero_plan
+            repair_iterations += 1
+            continue
+
+        low = 0.0
+        high = order
+
+        # Ищем максимальный storage-safe заказ, чтобы не терять лишний
+        # физически допустимый запас и не ломать резерв 45 дней.
+        for _ in range(20):
+            mid = (low + high) / 2.0
+            trial = copy.deepcopy(current)
+            _set_order(case, trial, sid, year, mid)
+            trial_results, _ = _evaluate_all(case, trial, scenarios)
+
+            if _storage_is_feasible(trial_results):
+                low = mid
+            else:
+                high = mid
+
+        repaired = copy.deepcopy(current)
+        _set_order(case, repaired, sid, year, low)
+
+        if abs(repaired.order(sid, year) - order) <= 1e-10:
             break
 
-        current = trial
+        current = repaired
         repair_iterations += 1
 
     results, score = _evaluate_all(case, current, scenarios)
     return current, results, score, repair_iterations
-
 
 def _order_variables(case: Case, plan: Plan) -> List[Tuple[str, int]]:
     variables = []
