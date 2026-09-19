@@ -491,24 +491,36 @@ def _repair_reserve(
         repaired = False
         for _, sid, room in source_candidates:
             current_order = current.order(sid, prev_year)
-            lo = 0.0
-            hi = room
 
-            trial_zero = copy.deepcopy(current)
-            trial_zero_order = current.order(sid, prev_year)
-            _set_order(case, trial_zero, sid, prev_year, trial_zero_order + hi)
-            high_results, _ = _evaluate_all(case, trial_zero, scenarios)
+            # Верхняя граница должна сама быть физически безопасной.
+            # Полный остаток мощности может переполнить storage, поэтому
+            # сначала находим максимальный безопасный объём методом
+            # последовательного уменьшения верхней границы.
+            safe_hi = room
+            safe_results = None
+            for _ in range(12):
+                trial = copy.deepcopy(current)
+                _set_order(case, trial, sid, prev_year, current_order + safe_hi)
+                candidate_results, _ = _evaluate_all(case, trial, scenarios)
+                if _storage_is_feasible(candidate_results):
+                    safe_results = candidate_results
+                    break
+                safe_hi *= 0.5
 
-            # Если даже полный оставшийся ресурс не даёт резерв,
-            # пробуем следующий канал.
-            if (
-                not _reserve_is_feasible_for_year(high_results, year)
-                or not _storage_is_feasible(high_results)
-            ):
+            if safe_results is None or safe_hi <= 1e-9:
                 continue
 
-            # Ищем минимальную добавку, которая делает весь набор сценариев
-            # физически резервно-совместимым и не создаёт overflow.
+            # Если даже максимальная storage-safe добавка не достигает
+            # резерва нужного года, этот канал отдельно задачу не решает.
+            if not _reserve_is_feasible_for_year(safe_results, year):
+                continue
+
+            lo = 0.0
+            hi = safe_hi
+
+            # Ищем минимальную безопасную добавку, обеспечивающую резерв
+            # в конкретном году. Результаты других ещё не исправленных лет
+            # здесь намеренно не учитываются.
             for _ in range(24):
                 mid = (lo + hi) / 2.0
                 trial = copy.deepcopy(current)
@@ -521,10 +533,7 @@ def _repair_reserve(
                 )
                 trial_results, _ = _evaluate_all(case, trial, scenarios)
 
-                if (
-                    _reserve_is_feasible_for_year(trial_results, year)
-                    and _storage_is_feasible(trial_results)
-                ):
+                if _reserve_is_feasible_for_year(trial_results, year):
                     hi = mid
                 else:
                     lo = mid
