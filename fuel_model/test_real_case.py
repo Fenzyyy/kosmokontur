@@ -120,6 +120,42 @@ class RealCaseInputTests(unittest.TestCase):
                 f"min_sl_critical={scenario_result.kpis['min_sl_critical']:.6f}"
             )
 
+    def test_optimizer_records_full_investment_frontier(self):
+        result = optimize(
+            self.case,
+            [base(), mandatory_stress()],
+            config=OptimizerConfig(
+                max_investment_options_exhaustive=8,
+                max_local_search_passes=1,
+                step_fraction_of_capacity=0.10,
+                min_step_tons=5.0,
+            ),
+        )
+
+        # Для трёх инвестиционных опций exhaustive search даёт 2^3 = 8
+        # комбинаций, включая варианты, отброшенные до запуска engine.
+        self.assertEqual(len(result.candidate_summaries), 8)
+        self.assertEqual(
+            sum(summary.selected for summary in result.candidate_summaries),
+            1,
+        )
+
+        evaluated = [
+            summary
+            for summary in result.candidate_summaries
+            if summary.status == "evaluated"
+        ]
+        self.assertEqual(len(evaluated), result.candidates_checked)
+        self.assertTrue(
+            all("BASE" in summary.scenario_metrics for summary in evaluated)
+        )
+        self.assertTrue(
+            all(
+                "MANDATORY_STRESS" in summary.scenario_metrics
+                for summary in evaluated
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
