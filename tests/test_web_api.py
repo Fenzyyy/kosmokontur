@@ -172,3 +172,72 @@ def test_api_preserves_explicit_investment_schedule_end_to_end():
     assert set(data["plan"]["investments"]) == {"EARTH_NEW"}
     assert data["plan"]["investments"]["EARTH_NEW"] == earth_new["default_schedule"]
     assert len(data["frontier"]) == 1
+
+
+def test_user_plan_round_trip_preserves_all_plan_sections():
+    c = case()
+    earth_new = build_investment_decision(c, "EARTH_NEW")
+    plan = Plan(
+        "user-plan",
+        name="Проверка пользовательского ввода",
+        orders={
+            "A": {2035: 50.0, 2036: 55.0},
+            "B": {2035: 20.0},
+        },
+        reserved={
+            "A": {2035: 60.0, 2036: 65.0},
+            "B": {2035: 25.0},
+        },
+        initial_stock=[],
+        investments={"EARTH_NEW": earth_new},
+    )
+
+    encoded = plan.to_dict()
+    decoded = Plan.from_dict(encoded)
+    assert decoded.to_dict() == encoded
+
+    response = client.post(
+        "/api/calculate",
+        json={"plan": encoded, "scenario_id": "BASE"},
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["meta"]["plan_id"] == "user-plan"
+    assert result["meta"]["scenario_id"] == "BASE"
+    assert len(result["yearly"]) == len(c.years)
+    assert len(result["costs"]) == len(c.years)
+
+
+def test_user_plan_optimizer_returns_same_contract_shape():
+    c = case()
+    plan = Plan(
+        "user-plan",
+        orders={"A": {2035: 50.0}, "B": {2035: 20.0}},
+        reserved={"A": {2035: 60.0}, "B": {2035: 25.0}},
+        investments={"EARTH_NEW": build_investment_decision(c, "EARTH_NEW")},
+    )
+
+    response = client.post(
+        "/api/optimize",
+        json={
+            "plan": plan.to_dict(),
+            "scenario_ids": ["BASE"],
+            "run_frontier": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+
+    returned_plan = data["plan"]
+    assert set(returned_plan) >= {
+        "plan_id",
+        "name",
+        "notes",
+        "orders",
+        "reserved",
+        "initial_stock",
+        "investments",
+    }
+    assert set(returned_plan["investments"]) == {"EARTH_NEW"}
+    assert "2035" in returned_plan["orders"]["A"]
+    assert "2035" in returned_plan["reserved"]["A"]
