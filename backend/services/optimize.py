@@ -47,6 +47,7 @@ def optimization_to_dict(result: OptimizationResult) -> dict[str, Any]:
             "selected": candidate.selected,
             "capex_total": candidate.capex_total,
             "capex_through_deadline": candidate.capex_through_deadline,
+            "scenario_metrics": metrics,
             "service_level_base": base.get("min_sl_total"),
             "service_level_stress": stress.get("min_sl_total"),
             "shortage_base": base.get("shortage_total"),
