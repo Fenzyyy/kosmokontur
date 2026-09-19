@@ -440,6 +440,124 @@ def _reserve_is_feasible(results: Mapping[str, Result]) -> bool:
     )
 
 
+def _repair_benchmark_reallocation(
+    case: Case,
+    seed: Plan,
+    scenarios: Sequence[Scenario],
+    config: OptimizerConfig,
+) -> Tuple[Plan, Dict[str, Result], Tuple[float, ...], int]:
+    """Парный перенос заказа между годами для улучшения benchmark stress.
+
+    Coordinate-descent может не увидеть полезный обмен: отдельное уменьшение
+    заказа в предыдущем году ухудшает score, как и отдельное увеличение в
+    будущем году из-за storage, хотя их комбинация улучшает весь горизонт.
+    """
+    current = copy.deepcopy(seed)
+    results, current_score = _evaluate_all(case, current, scenarios)
+    iterations = 0
+
+    benchmark_scenarios = [
+        s for s in scenarios if s.sl_is_benchmark
+    ]
+    if not benchmark_scenarios:
+        return current, results, current_score, iterations
+
+    for _ in range(6):
+        improved = False
+
+        # Выбираем самый проблемный benchmark-year.
+        target_year = max(
+            case.years,
+            key=lambda y: sum(
+                max(
+                    0.0,
+                    row["demand_total"] - row["served_total"],
+                )
+                for sid, result in results.items()
+                if sid in {s.scenario_id for s in benchmark_scenarios}
+                for row in result.yearly
+                if row["year"] == y
+            ),
+        )
+
+        for source_out, source_in in (
+            (a, b) for a in case.sources for b in case.sources
+        ):
+            for from_year in range(case.first_year, target_year):
+                out_order = current.order(source_out, from_year)
+                if out_order <= 1e-9:
+                    continue
+
+                res = resolve(case, current)
+                frac_in = res.cal.fraction_available(
+                    target_year, res.avail_day[source_in]
+                )
+                if frac_in <= 1e-12:
+                    continue
+
+                source_in_obj = case.sources[source_in]
+                room = max(
+                    0.0,
+                    source_in_obj.capacity * frac_in
+                    - current.order(source_in, target_year),
+                )
+                if room <= 1e-9:
+                    continue
+
+                step = min(
+                    5.0,
+                    out_order,
+                    room,
+                    max(config.min_step_tons, 1.0),
+                )
+
+                trial = copy.deepcopy(current)
+                _set_order(
+                    case,
+                    trial,
+                    source_out,
+                    from_year,
+                    out_order - step,
+                )
+                _set_order(
+                    case,
+                    trial,
+                    source_in,
+                    target_year,
+                    current.order(source_in, target_year) + step,
+                )
+
+                trial_results, trial_score = _evaluate_all(
+                    case, trial, scenarios
+                )
+
+                if not _storage_is_feasible(trial_results):
+                    continue
+                if not _reserve_is_feasible(trial_results):
+                    continue
+                if any(
+                    r.kpis["hard_violations"] > 0
+                    for r in trial_results.values()
+                ):
+                    continue
+
+                # Принимаем только реальное lexicographic improvement.
+                if trial_score < current_score:
+                    current = trial
+                    results = trial_results
+                    current_score = trial_score
+                    iterations += 1
+                    improved = True
+                    break
+
+            if improved:
+                break
+        if not improved:
+            break
+
+    return current, results, current_score, iterations
+
+
 def _free_storage_before_year(
     case: Case,
     plan: Plan,
@@ -1253,6 +1371,11 @@ def _local_search(
 
         if not improved:
             break
+
+    current, results, current_score, benchmark_iterations = _repair_benchmark_reallocation(
+        case, current, scenarios, config
+    )
+    iterations += benchmark_iterations
 
     current, results, current_score, final_service_iterations = _repair_service_shortage(
         case, current, scenarios, config
