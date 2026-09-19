@@ -406,7 +406,7 @@ def _repair_reserve(
     """
     current = copy.deepcopy(seed)
     iterations = 0
-    max_repairs = max(1, len(case.years) * len(case.sources) * 2)
+    max_repairs = max(1, len(case.years) * 4)
 
     for _ in range(max_repairs):
         results, score = _evaluate_all(case, current, scenarios)
@@ -498,7 +498,7 @@ def _repair_reserve(
             # последовательного уменьшения верхней границы.
             safe_hi = room
             safe_results = None
-            for _ in range(12):
+            for _ in range(8):
                 trial = copy.deepcopy(current)
                 _set_order(case, trial, sid, prev_year, current_order + safe_hi)
                 candidate_results, _ = _evaluate_all(case, trial, scenarios)
@@ -525,7 +525,7 @@ def _repair_reserve(
             # Ищем минимальную безопасную добавку, обеспечивающую резерв
             # в конкретном году. Результаты других ещё не исправленных лет
             # здесь намеренно не учитываются.
-            for _ in range(24):
+            for _ in range(10):
                 mid = (lo + hi) / 2.0
                 trial = copy.deepcopy(current)
                 _set_order(
@@ -563,6 +563,27 @@ def _repair_reserve(
 
     results, score = _evaluate_all(case, current, scenarios)
     return current, results, score, iterations
+
+
+def _investment_subset_can_meet_loss_ceilings(
+    case: Case,
+    option_ids: Sequence[str],
+    scenarios: Sequence[Scenario],
+) -> bool:
+    """Дешёвый precheck: storage loss ceiling не должен быть заведомо недостижим."""
+    selected_storage_modes = {case.base_storage_id}
+    for oid in option_ids:
+        option = case.options[oid]
+        if option.kind == "storage" and option.target_id in case.storage:
+            selected_storage_modes.add(option.target_id)
+
+    best_loss_rate = min(case.storage[mid].loss_rate for mid in selected_storage_modes)
+
+    for scenario in scenarios:
+        for ceiling in scenario.loss_ceiling.values():
+            if best_loss_rate > ceiling + 1e-12:
+                return False
+    return True
 
 
 def _storage_overflow_excess(results: Mapping[str, Result]) -> float:
@@ -603,7 +624,7 @@ def _repair_storage_overflow(
     current = copy.deepcopy(seed)
     _clip_initial_stock_to_storage(case, current)
     repair_iterations = 0
-    max_repairs = max(1, len(case.years) * len(case.sources) * 4)
+    max_repairs = max(1, len(case.years) * 3)
 
     for _ in range(max_repairs):
         results, score = _evaluate_all(case, current, scenarios)
@@ -804,6 +825,15 @@ def optimize(
     notes: List[str] = []
 
     for option_ids in _investment_subsets(case, config):
+        if not _investment_subset_can_meet_loss_ceilings(
+            case, option_ids, scenario_list
+        ):
+            notes.append(
+                f"Кандидат с инвестициями {option_ids} отклонён: "
+                "storage loss ceiling заведомо недостижим."
+            )
+            continue
+
         seed = _with_investments(base_plan, case, option_ids)
         if seed is None:
             continue
