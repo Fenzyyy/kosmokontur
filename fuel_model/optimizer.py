@@ -337,7 +337,7 @@ def _score_results(
 
     for result in results.values():
         reserve_gap += sum(
-            max(0.0, row["reserve_required"] - row["reserve_stock_at_check"])
+            max(0.0, row["reserve_required"] - row.get("reserve_covered", row["reserve_stock_at_check"]))
             for row in result.yearly
         )
         benchmark_misses += result.kpis["benchmark_misses"]
@@ -377,7 +377,7 @@ def _reserve_is_feasible_for_year(
         for row in result.yearly:
             if row["year"] != year:
                 continue
-            if row["reserve_stock_at_check"] + 1e-8 < row["reserve_required"]:
+            if row.get("reserve_covered", row["reserve_stock_at_check"]) + 1e-8 < row["reserve_required"]:
                 return False
     return True
 
@@ -389,6 +389,39 @@ def _reserve_is_feasible(results: Mapping[str, Result]) -> bool:
         for result in results.values()
         for v in result.violations
     )
+
+
+def _set_emergency_reserve(
+    case: Case,
+    plan: Plan,
+    year: int,
+    additional_tons: float,
+) -> float:
+    """Добавить контрактный Emergency reserve без физического поступления."""
+    if additional_tons <= 1e-9:
+        return 0.0
+
+    eid = case.constraints.emergency_source_id
+    if eid not in case.sources:
+        return 0.0
+
+    source = case.sources[eid]
+    res = resolve(case, plan)
+    frac = res.cal.fraction_available(year, res.avail_day[eid])
+    if frac <= 1e-12:
+        return 0.0
+
+    limit = source.capacity * frac
+    current_reserved = plan.reserved_capacity(source, year)
+    add = min(
+        float(additional_tons),
+        max(0.0, limit - current_reserved),
+    )
+    if add <= 1e-9:
+        return 0.0
+
+    plan.reserved.setdefault(eid, {})[year] = current_reserved + add
+    return add
 
 
 def _repair_reserve(
@@ -414,11 +447,64 @@ def _repair_reserve(
         if _reserve_is_feasible(results):
             return current, results, score, iterations
 
+        # Сначала используем допустимый контрактный Emergency reserve.
+        # Он не занимает физическое хранилище и потому является первым
+        # способом устранить недобор 45-дневного резерва.
+        contract_shortages = []
+        for result in results.values():
+            for row in result.yearly:
+                gap = max(
+                    0.0,
+                    row["reserve_required"]
+                    - row.get("reserve_covered", row["reserve_stock_at_check"]),
+                )
+                if gap > 1e-8:
+                    contract_shortages.append((gap, row["year"]))
+        if contract_shortages:
+            _, contract_year = max(
+                contract_shortages,
+                key=lambda x: (x[0], -x[1]),
+            )
+            gap = max(
+                gap
+                for result in results.values()
+                for row in result.yearly
+                if row["year"] == contract_year
+                for gap in [
+                    max(
+                        0.0,
+                        row["reserve_required"]
+                        - row.get("reserve_covered", row["reserve_stock_at_check"]),
+                    )
+                ]
+            )
+            trial = copy.deepcopy(current)
+            added = _set_emergency_reserve(
+                case, trial, contract_year, gap
+            )
+            if added > 1e-9:
+                trial_results, trial_score = _evaluate_all(
+                    case, trial, scenarios
+                )
+                if _reserve_is_feasible_for_year(
+                    trial_results, contract_year
+                ) or _storage_is_feasible(trial_results):
+                    current = trial
+                    iterations += 1
+                    if _reserve_is_feasible(trial_results):
+                        return current, trial_results, trial_score, iterations
+                    results, score = trial_results, trial_score
+                    continue
+
         # Берём первый год с максимальным физическим недобором.
         shortages = []
         for result in results.values():
             for row in result.yearly:
-                gap = max(0.0, row["reserve_required"] - row["reserve_stock_at_check"])
+                gap = max(
+                    0.0,
+                    row["reserve_required"]
+                    - row.get("reserve_covered", row["reserve_stock_at_check"])
+                )
                 if gap > 1e-8:
                     shortages.append((gap, row["year"], result.meta["scenario_id"]))
 
@@ -497,7 +583,8 @@ def _repair_reserve(
             current_gap = max(
                 max(
                     0.0,
-                    row["reserve_required"] - row["reserve_stock_at_check"],
+                    row["reserve_required"]
+                    - row.get("reserve_covered", row["reserve_stock_at_check"]),
                 )
                 for result in results.values()
                 for row in result.yearly
@@ -540,7 +627,8 @@ def _repair_reserve(
                 after_gap = max(
                     max(
                         0.0,
-                        row["reserve_required"] - row["reserve_stock_at_check"],
+                        row["reserve_required"]
+                        - row.get("reserve_covered", row["reserve_stock_at_check"]),
                     )
                     for result in safe_results.values()
                     for row in result.yearly
@@ -615,7 +703,8 @@ def _repair_reserve(
                 for row in result.yearly:
                     gap = max(
                         0.0,
-                        row["reserve_required"] - row["reserve_stock_at_check"],
+                        row["reserve_required"]
+                    - row.get("reserve_covered", row["reserve_stock_at_check"]),
                     )
                     if gap > 1e-8:
                         remaining.append(
