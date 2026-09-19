@@ -27,6 +27,9 @@ jobs:
       - name: Run web integration tests
         run: PYTHONPATH=. pytest -q tests/test_web_api.py
 
+      - name: Verify frontend JavaScript syntax
+        run: node --check frontend/app.js
+
       - name: Verify frontend has no external runtime URLs
         shell: python
         run: |
