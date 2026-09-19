@@ -117,3 +117,14 @@ def test_zero_ui_template_is_treated_as_empty_plan():
 
     template.orders["A"][2035] = 1.0
     assert _plan_has_decisions(template) is True
+
+
+def test_frontend_assets_are_served_by_fastapi():
+    index = client.get("/")
+    assert index.status_code == 200
+    assert "Kosmokontur" in index.text
+
+    app_js = client.get("/app.js")
+    styles = client.get("/styles.css")
+    assert app_js.status_code == 200
+    assert styles.status_code == 200
