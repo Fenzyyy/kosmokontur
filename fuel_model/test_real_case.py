@@ -4,7 +4,7 @@ import os
 
 from .loader import load_case
 from .optimizer import OptimizerConfig, optimize
-from .scenarios import base
+from .scenarios import base, mandatory_stress
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -62,6 +62,51 @@ class RealCaseInputTests(unittest.TestCase):
         self.assertEqual(base_result.kpis["hard_violations"], 0)
         self.assertAlmostEqual(base_result.kpis["shortage_total"], 0.0, places=6)
         self.assertAlmostEqual(base_result.kpis["shortage_critical"], 0.0, places=6)
+
+    def test_optimizer_runs_on_base_and_mandatory_stress(self):
+        result = optimize(
+            self.case,
+            [base(), mandatory_stress()],
+            config=OptimizerConfig(
+                max_investment_options_exhaustive=8,
+                max_local_search_passes=1,
+                step_fraction_of_capacity=0.10,
+                min_step_tons=5.0,
+            ),
+        )
+
+        self.assertGreater(result.candidates_checked, 0)
+        self.assertEqual(set(result.scenario_results), {"BASE", "MANDATORY_STRESS"})
+
+        for scenario_id, scenario_result in result.scenario_results.items():
+            self.assertEqual(
+                scenario_result.kpis["hard_violations"],
+                0,
+                msg=f"{scenario_id}: HARD violations found",
+            )
+            self.assertAlmostEqual(
+                scenario_result.kpis["shortage_total"],
+                0.0,
+                places=6,
+                msg=f"{scenario_id}: total shortage",
+            )
+            self.assertAlmostEqual(
+                scenario_result.kpis["shortage_critical"],
+                0.0,
+                places=6,
+                msg=f"{scenario_id}: critical shortage",
+            )
+
+        print("\nMULTI-SCENARIO OPTIMIZATION")
+        print("investments:", sorted(result.plan.investments))
+        print("score:", result.score)
+        for scenario_id, scenario_result in result.scenario_results.items():
+            print(
+                f"{scenario_id}: "
+                f"cost={scenario_result.kpis['total_cost']:.3f}, "
+                f"service={scenario_result.kpis['service_level_total']:.6f}, "
+                f"critical_service={scenario_result.kpis['service_level_critical']:.6f}"
+            )
 
 
 if __name__ == "__main__":
