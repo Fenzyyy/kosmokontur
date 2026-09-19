@@ -201,12 +201,15 @@ class Plan:
         return float(self.orders.get(source_id, {}).get(year, 0.0))
 
     def reserved_capacity(self, source: Source, year: int) -> float:
-        """Явно заданный резерв; для каналов без платы за резерв и без take-or-pay резерв не нужен и равен мощности."""
+        """Вернуть контрактный резерв с учётом семантики источника."""
+        if source.reservation_rate == 0 and source.top_share == 0:
+            # Для каналов без reservation / take-or-pay резерв не является
+            # отдельным решением и всегда равен полной доступной мощности.
+            return float(source.capacity)
+
         given = self.reserved.get(source.source_id, {})
         if year in given:
             return float(given[year])
-        if source.reservation_rate == 0 and source.top_share == 0:
-            return float(source.capacity)
         return 0.0
 
     # --- сериализация (JSON: сохранение и повторное открытие плана)
