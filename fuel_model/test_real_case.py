@@ -78,6 +78,22 @@ class RealCaseInputTests(unittest.TestCase):
         self.assertGreater(result.candidates_checked, 0)
         self.assertEqual(set(result.scenario_results), {"BASE", "MANDATORY_STRESS"})
 
+        print("\nOPTIMIZER PLAN:", result.plan.to_dict())
+        for _sid, _result in result.scenario_results.items():
+            print(
+                _sid,
+                "score=", result.score,
+                "shortage=", _result.kpis["shortage_total"],
+                "critical_shortage=", _result.kpis["shortage_critical"],
+            )
+            for _row in _result.yearly:
+                print(
+                    _row["year"],
+                    "demand=", _row["demand_total"],
+                    "served=", _row["served_total"],
+                    "reserve=", _row.get("reserve_covered", _row["reserve_stock_at_check"]),
+                )
+
         for scenario_id, scenario_result in result.scenario_results.items():
             self.assertEqual(
                 scenario_result.kpis["hard_violations"],
