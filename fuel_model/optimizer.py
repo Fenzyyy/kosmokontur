@@ -245,16 +245,14 @@ def _build_greedy_plan(
     scenarios: Sequence[Scenario],
     initial_reserve: bool,
 ) -> Plan:
-    """Сформировать робастный стартовый supply plan для всех сценариев.
+    """Сформировать физически консервативный стартовый plan.
 
-    Для начального кандидата берём максимум спроса по сценариям и минимальную
-    долю фактической поставки по каждому каналу. Это не заменяет evaluate():
-    точная физика по-прежнему считается в engine.evaluate().
+    Для нескольких сценариев seed строится относительно максимального
+    сценарного спроса, но резерв 45 дней при наличии Emergency держится
+    как контрактный резерв и не занимает storage. Поэтому начальный seed
+    не пытается одновременно хранить запас и покрывать стрессовый спрос.
     """
     plan = copy.deepcopy(base_plan)
-
-    if initial_reserve:
-        _candidate_initial_stock(case, plan)
 
     scenario_list = tuple(scenarios)
     if not scenario_list:
@@ -268,25 +266,47 @@ def _build_greedy_plan(
         for scenario in scenario_list
     }
 
-    inventory = sum(lot.tons for lot in plan.initial_stock)
+    # Для оптимизатора без заданного initial_plan контрактный Emergency reserve
+    # является явным эквивалентом 45-дневного физического запаса.
+    plan.initial_stock = []
+    if initial_reserve and case.constraints.emergency_source_id in case.sources:
+        eid = case.constraints.emergency_source_id
+        emergency = case.sources[eid]
+        for year in case.years:
+            reserve_required = max(
+                demand[year][0] * case.constraints.reserve_days / 365.0
+                for demand in demand_by_scenario.values()
+            )
+            res = resolve(case, plan)
+            frac = res.cal.fraction_available(year, res.avail_day[eid])
+            reserve_limit = emergency.capacity * frac
+            reserve = min(reserve_required, reserve_limit)
+            if reserve > 1e-9:
+                plan.reserved.setdefault(eid, {})[year] = reserve
+
+    # Worst-case inventory is tracked against the maximum annual demand and
+    # the weakest delivery share of each channel.
+    inventory = 0.0
 
     for year in case.years:
         total_demand = max(
             demand[year][0] for demand in demand_by_scenario.values()
         )
 
-        if year != case.last_year:
-            next_total = max(
-                demand[year + 1][0] for demand in demand_by_scenario.values()
-            )
-            next_reserve = next_total * case.constraints.reserve_days / 365.0
-        else:
-            next_reserve = 0.0
-
-        need = max(0.0, total_demand + next_reserve - inventory)
-        year_actual_delivery = 0.0
-
         res = resolve(case, plan)
+        # Use the storage mode active at the beginning of the year.
+        mode = case.storage[res.storage_mode_at(res.cal.day(year))]
+        loss_rate = mode.loss_rate
+
+        # No target closing reserve is added here: the 45-day requirement is
+        # already represented by the explicit Emergency reserve contract.
+        gross_need = max(
+            0.0,
+            total_demand - inventory,
+        )
+        if loss_rate < 1.0 - 1e-12:
+            gross_need /= max(1e-12, 1.0 - loss_rate)
+
         available = []
         for sid, source in case.sources.items():
             frac = res.cal.fraction_available(year, res.avail_day[sid])
@@ -298,42 +318,46 @@ def _build_greedy_plan(
                 for scenario in scenario_list
             )
             min_share = max(0.0, float(min_share))
-            max_order = source.capacity * frac
-            max_actual = max_order * min_share
+            if min_share <= 1e-12:
+                continue
 
+            max_order = source.capacity * frac
+            max_actual_worst = max_order * min_share
             rank = (
                 (source.variable_cost + source.reservation_rate) / min_share
-                if min_share > 1e-12
-                else float("inf")
             )
-            available.append((sid, frac, max_order, max_actual, rank))
+            available.append(
+                (rank, _source_rank(case, sid), sid, max_order, max_actual_worst)
+            )
 
-        available.sort(key=lambda x: (x[4], _source_rank(case, x[0])))
+        available.sort(key=lambda x: (x[0], x[1]))
 
-        for sid, _frac, max_order, max_actual, _rank in available:
+        need = gross_need
+        actual_delivery = 0.0
+
+        for _, _, sid, max_order, max_actual_worst in available:
             if need <= 1e-9:
                 break
 
+            source = case.sources[sid]
             min_share = min(
                 scenario.delivery_share.get((sid, year), 1.0)
                 for scenario in scenario_list
             )
-            min_share = max(0.0, float(min_share))
-
-            if min_share <= 1e-12:
-                continue
-
-            actual_need = min(need, max_actual)
-            order = min(max_order, actual_need / min_share)
+            actual_need = min(need, max_actual_worst)
+            order = min(max_order, actual_need / max(min_share, 1e-12))
             if order <= 1e-9:
                 continue
 
             _set_order(case, plan, sid, year, order)
-            actual_received = order * min_share
-            year_actual_delivery += actual_received
-            need -= actual_received
+            actual = order * min_share
+            actual_delivery += actual
+            need -= actual
 
-        inventory = max(0.0, inventory + year_actual_delivery - total_demand)
+        inventory = max(
+            0.0,
+            inventory + actual_delivery * (1.0 - loss_rate) - total_demand,
+        )
 
     return plan
 
