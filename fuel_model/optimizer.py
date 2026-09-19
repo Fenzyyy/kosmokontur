@@ -468,92 +468,145 @@ def _repair_reserve(
             iterations += 1
             continue
 
-        prev_year = year - 1
-
-        # Сначала рассматриваем физически доступные каналы предыдущего года.
-        res = resolve(case, current)
-        source_candidates = []
-        for sid, source in case.sources.items():
-            frac = res.cal.fraction_available(prev_year, res.avail_day[sid])
-            current_order = current.order(sid, prev_year)
-            max_order = source.capacity * frac
-            room = max(0.0, max_order - current_order)
-            if frac > 1e-12 and room > 1e-9:
-                source_candidates.append(
-                    (
-                        source.variable_cost + source.reservation_rate,
-                        sid,
-                        room,
-                    )
-                )
-
-        source_candidates.sort(key=lambda x: (x[0], x[1]))
-
         repaired = False
-        for _, sid, room in source_candidates:
-            current_order = current.order(sid, prev_year)
 
-            # Верхняя граница должна сама быть физически безопасной.
-            # Полный остаток мощности может переполнить storage, поэтому
-            # сначала находим максимальный безопасный объём методом
-            # последовательного уменьшения верхней границы.
-            safe_hi = room
-            safe_results = None
-            for _ in range(8):
-                trial = copy.deepcopy(current)
-                _set_order(case, trial, sid, prev_year, current_order + safe_hi)
-                candidate_results, _ = _evaluate_all(case, trial, scenarios)
-                if _storage_is_feasible(candidate_results):
-                    safe_results = candidate_results
-                    break
-                safe_hi *= 0.5
-
-            if safe_results is None or safe_hi <= 1e-9:
-                continue
-
-            # Если один канал не закрывает весь недобор, используем
-            # его максимально допустимую storage-safe добавку и на
-            # следующей итерации доберём остаток другим каналом.
-            if not _reserve_is_feasible_for_year(safe_results, year):
-                current = trial
-                iterations += 1
-                repaired = True
-                break
-
-            lo = 0.0
-            hi = safe_hi
-
-            # Ищем минимальную безопасную добавку, обеспечивающую резерв
-            # в конкретном году. Результаты других ещё не исправленных лет
-            # здесь намеренно не учитываются.
-            for _ in range(10):
-                mid = (lo + hi) / 2.0
-                trial = copy.deepcopy(current)
-                _set_order(
-                    case,
-                    trial,
-                    sid,
-                    prev_year,
-                    current_order + mid,
+        # Если в непосредственном предшествующем году нельзя добавить
+        # физически безопасный объём, пробуем строить резерв ещё раньше.
+        for build_year in range(year - 1, case.first_year - 1, -1):
+            res = resolve(case, current)
+            source_candidates = []
+            for sid, source in case.sources.items():
+                frac = res.cal.fraction_available(
+                    build_year, res.avail_day[sid]
                 )
-                trial_results, _ = _evaluate_all(case, trial, scenarios)
+                current_order = current.order(sid, build_year)
+                max_order = source.capacity * frac
+                room = max(0.0, max_order - current_order)
+                if frac > 1e-12 and room > 1e-9:
+                    source_candidates.append(
+                        (
+                            source.variable_cost + source.reservation_rate,
+                            sid,
+                            room,
+                        )
+                    )
 
-                if _reserve_is_feasible_for_year(trial_results, year):
-                    hi = mid
+            source_candidates.sort(key=lambda x: (x[0], x[1]))
+
+            # Текущий максимальный недобор именно для target year.
+            current_gap = max(
+                max(
+                    0.0,
+                    row["reserve_required"] - row["reserve_stock_at_check"],
+                )
+                for result in results.values()
+                for row in result.yearly
+                if row["year"] == year
+            )
+
+            for _, sid, room in source_candidates:
+                current_order = current.order(sid, build_year)
+
+                safe_hi = room
+                safe_trial = None
+                safe_results = None
+
+                # Находим положительную storage-safe добавку.
+                for _ in range(8):
+                    trial = copy.deepcopy(current)
+                    _set_order(
+                        case,
+                        trial,
+                        sid,
+                        build_year,
+                        current_order + safe_hi,
+                    )
+                    candidate_results, _ = _evaluate_all(
+                        case, trial, scenarios
+                    )
+                    if _storage_is_feasible(candidate_results):
+                        safe_trial = trial
+                        safe_results = candidate_results
+                        break
+                    safe_hi *= 0.5
+
+                if (
+                    safe_trial is None
+                    or safe_results is None
+                    or safe_hi <= 1e-9
+                ):
+                    continue
+
+                after_gap = max(
+                    max(
+                        0.0,
+                        row["reserve_required"] - row["reserve_stock_at_check"],
+                    )
+                    for result in safe_results.values()
+                    for row in result.yearly
+                    if row["year"] == year
+                )
+
+                # Этот год/канал не помогает сформировать target reserve.
+                if after_gap >= current_gap - 1e-8:
+                    continue
+
+                if after_gap <= 1e-8:
+                    # Можно найти минимальную добавку, закрывающую резерв.
+                    lo = 0.0
+                    hi = safe_hi
+                    for _ in range(10):
+                        mid = (lo + hi) / 2.0
+                        trial = copy.deepcopy(current)
+                        _set_order(
+                            case,
+                            trial,
+                            sid,
+                            build_year,
+                            current_order + mid,
+                        )
+                        trial_results, _ = _evaluate_all(
+                            case, trial, scenarios
+                        )
+                        if (
+                            _reserve_is_feasible_for_year(
+                                trial_results, year
+                            )
+                            and _storage_is_feasible(trial_results)
+                        ):
+                            hi = mid
+                        else:
+                            lo = mid
+
+                    trial = copy.deepcopy(current)
+                    _set_order(
+                        case,
+                        trial,
+                        sid,
+                        build_year,
+                        current_order + hi,
+                    )
+                    trial_results, _ = _evaluate_all(
+                        case, trial, scenarios
+                    )
+                    if (
+                        _reserve_is_feasible_for_year(trial_results, year)
+                        and _storage_is_feasible(trial_results)
+                    ):
+                        current = trial
+                        iterations += 1
+                        repaired = True
+                        break
                 else:
-                    lo = mid
+                    # Один канал/год не закрывает весь недобор, но даёт
+                    # максимально допустимый физический вклад. Остаток
+                    # будет добран следующей итерацией.
+                    current = safe_trial
+                    iterations += 1
+                    repaired = True
+                    break
 
-            trial = copy.deepcopy(current)
-            _set_order(case, trial, sid, prev_year, current_order + hi)
-            trial_results, trial_score = _evaluate_all(case, trial, scenarios)
-
-            if (
-                _reserve_is_feasible_for_year(trial_results, year)
-                and _storage_is_feasible(trial_results)
-            ):
-                current = trial
-                iterations += 1
-                repaired = True
+            if repaired:
                 break
 
         if not repaired:
