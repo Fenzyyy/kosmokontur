@@ -27,7 +27,7 @@
 </section>
 <section id="view-frontier" class="view">
 <div class="section-title"><div><span class="eyebrow">03 · INVESTMENT SPACE</span><h2>Investment frontier</h2></div></div>
-<section class="card"><div class="card-head"><div><h3>CAPEX ↔ service level</h3><span>Каждая точка — инвестиционный кандидат, проверенный через fuel_model.</span></div></div><div class="chart-large"><canvas id="frontierChart"></canvas></div></section>
+<section class="card"><div class="card-head"><div><h3>CAPEX ↔ service level</h3><span>Каждая точка — инвестиционный кандидат, проверенный через fuel_model.</span></div></div><div class="chart-large"><div id="frontierChart" class="svg-chart"></div></div></section>
 <section class="card"><div class="card-head"><div><h3>Кандидаты</h3><span>Отмечен выбранный оптимизатором вариант.</span></div></div><div id="frontierTable" class="table-scroll"></div></section>
 </section>
 <section id="view-advanced" class="view">
@@ -38,6 +38,5 @@
 </main>
 <footer><span>fuel_model → FastAPI → browser</span><span id="engineInfo">engine —</span></footer>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="app.js"></script>
 </body></html>
