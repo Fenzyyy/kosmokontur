@@ -97,8 +97,20 @@ class OptimizationResult:
 def _investment_subsets(
     case: Case,
     config: OptimizerConfig,
+    fixed_option_ids: Optional[Sequence[str]] = None,
 ) -> Iterable[Tuple[str, ...]]:
-    """Перебирает комбинации инвестиций."""
+    """Перебрать комбинации инвестиций или явно выбранный Plan набор."""
+    if fixed_option_ids is not None:
+        selected = tuple(sorted(str(option_id) for option_id in fixed_option_ids))
+        unknown = sorted(set(selected) - set(case.options))
+        if unknown:
+            raise ValueError(
+                f"Plan содержит неизвестные инвестиции: {unknown}; "
+                f"доступны: {sorted(case.options)}"
+            )
+        yield selected
+        return
+
     ids = tuple(case.options)
     n = len(ids)
 
@@ -115,8 +127,12 @@ def _investment_subsets(
         yield ids
 
 
-def _investment_capex(case: Case, option_ids: Sequence[str]) -> Tuple[float, float]:
-    """Вернуть суммарный CAPEX и CAPEX до контрольного года для набора инвестиций."""
+def _investment_capex(
+    case: Case,
+    option_ids: Sequence[str],
+    decisions: Optional[Mapping[str, InvestmentDecision]] = None,
+) -> Tuple[float, float]:
+    """Вернуть суммарный CAPEX и CAPEX до контрольного года."""
     total = 0.0
     through_deadline = 0.0
     deadline = case.constraints.capex_cumulative_year
@@ -124,7 +140,11 @@ def _investment_capex(case: Case, option_ids: Sequence[str]) -> Tuple[float, flo
     for option_id in option_ids:
         option = case.options[option_id]
         total += option.total_capex
-        decision = build_investment_decision(case, option_id)
+        decision = (
+            decisions[option_id]
+            if decisions is not None and option_id in decisions
+            else build_investment_decision(case, option_id)
+        )
         if decision is None:
             continue
         for stage_date, amount in zip(decision.stage_dates, option.stage_amounts):
@@ -157,10 +177,20 @@ def _with_investments(
     base_plan: Optional[Plan],
     case: Case,
     option_ids: Sequence[str],
+    preserve_existing: bool = False,
 ) -> Optional[Plan]:
     plan = copy.deepcopy(base_plan) if base_plan is not None else Plan("optimizer")
-    plan.investments = {}
 
+    if preserve_existing:
+        unknown = sorted(set(plan.investments) - set(case.options))
+        if unknown or set(plan.investments) != set(option_ids):
+            return None
+        # Явный график из Plan уже является решением пользователя.
+        # Канонический builder используется только для автоматически
+        # генерируемых инвестиционных кандидатов.
+        return plan
+
+    plan.investments = {}
     for option_id in option_ids:
         decision = build_investment_decision(case, option_id)
         if decision is None:
@@ -1436,8 +1466,12 @@ def optimize(
     notes: List[str] = []
     candidate_summaries: List[CandidateSummary] = []
 
-    for option_ids in _investment_subsets(case, config):
-        capex_total, capex_through_deadline = _investment_capex(case, option_ids)
+    fixed_investments = tuple(base_plan.investments) if base_plan.investments else None
+    for option_ids in _investment_subsets(case, config, fixed_investments):
+        fixed_decisions = base_plan.investments if fixed_investments is not None else None
+        capex_total, capex_through_deadline = _investment_capex(
+            case, option_ids, fixed_decisions
+        )
 
         if not _investment_subset_can_meet_loss_ceilings(
             case, option_ids, scenario_list
@@ -1457,7 +1491,12 @@ def optimize(
             )
             continue
 
-        seed = _with_investments(base_plan, case, option_ids)
+        seed = _with_investments(
+            base_plan,
+            case,
+            option_ids,
+            preserve_existing=fixed_investments is not None,
+        )
         if seed is None:
             candidate_summaries.append(
                 CandidateSummary(
