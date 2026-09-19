@@ -307,6 +307,10 @@ def _build_greedy_plan(
         if loss_rate < 1.0 - 1e-12:
             gross_need /= max(1e-12, 1.0 - loss_rate)
 
+        # Небольшой технологический запас компенсирует дискретный
+        # суточный/месячный график поставок и пограничное округление.
+        gross_need += 0.5
+
         available = []
         for sid, source in case.sources.items():
             frac = res.cal.fraction_available(year, res.avail_day[sid])
