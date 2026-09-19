@@ -406,6 +406,7 @@ def _repair_reserve(
     """
     current = copy.deepcopy(seed)
     iterations = 0
+    diagnostics: List[str] = []
     max_repairs = max(1, len(case.years) * 4)
 
     for _ in range(max_repairs):
@@ -556,10 +557,26 @@ def _repair_reserve(
                 break
 
         if not repaired:
-            # Теоретически резерв может быть физически неисполняем,
-            # тогда сохраняем лучший найденный кандидат и даём engine
-            # явно сообщить о нарушении.
+            remaining = []
+            for result in results.values():
+                for row in result.yearly:
+                    gap = max(
+                        0.0,
+                        row["reserve_required"] - row["reserve_stock_at_check"],
+                    )
+                    if gap > 1e-8:
+                        remaining.append(
+                            f"{result.meta['scenario_id']}:{row['year']}={gap:.2f}t"
+                        )
+            diagnostics.append(
+                f"reserve repair stalled at year {year}; "
+                f"remaining={', '.join(remaining[:10])}"
+            )
             break
+
+    if diagnostics:
+        suffix = " ".join(diagnostics)
+        current.notes = (current.notes + " " + suffix).strip()
 
     results, score = _evaluate_all(case, current, scenarios)
     return current, results, score, iterations
@@ -875,7 +892,8 @@ def optimize(
             notes.append(
                 f"Кандидат с инвестициями {option_ids} отклонён: "
                 "не выполнен 45-дневный физический резерв "
-                f"({', '.join(reserve_gaps[:8])})."
+                f"({', '.join(reserve_gaps[:8])}). "
+                f"{candidate.notes or ''}"
             )
             continue
 
