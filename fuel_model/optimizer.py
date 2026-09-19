@@ -86,8 +86,13 @@ def _investment_decision(case: Case, option_id: str) -> Optional[InvestmentDecis
     stage_dates = tuple((stage_year, 1) for _ in option.stage_amounts)
     last_stage = stage_dates[-1] if stage_dates else (stage_year, 1)
 
+    build_months = (
+        option.max_build_months
+        if case.assumptions.lead_time_choice == "max"
+        else option.min_build_months
+    )
     service_year, service_month = _month_add(
-        last_stage[0], last_stage[1], int(round(option.min_build_months))
+        last_stage[0], last_stage[1], int(round(build_months))
     )
     if option.earliest_in_service_year is not None:
         service_year = max(service_year, option.earliest_in_service_year)
