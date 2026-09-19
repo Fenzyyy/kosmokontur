@@ -1,0 +1,74 @@
+name: Optimizer smoke test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  optimizer-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Smoke test optimizer
+        run: |
+          python - <<'PY'
+          from fuel_model.model import Case, Constraints, DemandRow, Plan, Source, StorageMode
+          from fuel_model.optimizer import optimize
+          from fuel_model.scenarios import base
+
+          case = Case(
+              demand={
+                  2035: DemandRow(
+                      year=2035,
+                      base_total=10.0,
+                      base_critical=6.0,
+                      low_total=8.0,
+                      high_total=12.0,
+                  )
+              },
+              sources={
+                  "X": Source(
+                      source_id="X",
+                      name="Synthetic source",
+                      capacity=100.0,
+                      variable_cost=1.0,
+                      reservation_rate=0.0,
+                      top_share=0.0,
+                      lead_time_min=0.0,
+                      lead_time_max=0.0,
+                      lead_time_unit="day",
+                      available_from_year=2035,
+                  )
+              },
+              storage={
+                  "BASE_STORAGE": StorageMode(
+                      mode_id="BASE_STORAGE",
+                      name="Synthetic storage",
+                      capacity=100.0,
+                      loss_rate=0.0,
+                      holding_cost=0.0,
+                  )
+              },
+              options={},
+              constraints=Constraints(),
+          )
+
+          result = optimize(case, [base()])
+
+          print("PLAN:", result.plan.to_dict())
+          print("SCORE:", result.score)
+          print("FEASIBLE:", result.feasible)
+          print("KPI:", result.scenario_results["BASE"].kpis)
+
+          assert result.feasible
+          assert result.scenario_results["BASE"].kpis["shortage_total"] < 1e-8
+          assert result.scenario_results["BASE"].kpis["shortage_critical"] < 1e-8
+          PY
