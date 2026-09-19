@@ -290,3 +290,27 @@ def test_api_rejects_invalid_scenario_and_plan():
         },
     )
     assert bad_scenario_list.status_code == 422
+
+
+def test_canonical_investment_schedule_dates_for_real_case():
+    c = case()
+    expected = {
+        "EARTH_NEW": {
+            "stage_dates": ["2035-01", "2035-01"],
+            "in_service": "2037-01",
+        },
+        "LUNAR_ISRU": {
+            "stage_dates": ["2035-01"],
+            "in_service": "2038-01",
+        },
+        "ZBO": {
+            "stage_dates": ["2036-01"],
+            "in_service": "2036-01",
+        },
+    }
+
+    actual = {
+        option_id: decision_to_dict(build_investment_decision(c, option_id))
+        for option_id in expected
+    }
+    assert actual == expected
