@@ -207,7 +207,10 @@ def _candidate_initial_stock(case: Case, plan: Plan) -> None:
     ]
     candidates.sort(key=lambda sid: _source_rank(case, sid))
 
-    remaining = reserve
+    # Начальный запас физически хранится в базовом режиме.
+    # Не генерируем заведомо невозможный объём.
+    base_capacity = case.storage[case.base_storage_id].capacity
+    remaining = min(reserve, base_capacity)
     lots: List[InitialStockLot] = []
     for sid in candidates:
         if remaining <= 1e-9:
@@ -364,6 +367,106 @@ def _evaluate_all(
     return results, _score_results(results)
 
 
+
+def _storage_overflow_excess(results: Mapping[str, Result]) -> float:
+    """Суммарное физическое переполнение хранения по всем сценариям."""
+    return sum(
+        max(0.0, float(v.excess or 0.0))
+        for result in results.values()
+        for v in result.violations
+        if v.code in ("STORAGE_OVERFLOW", "INITIAL_STOCK_EXCEEDS_STORAGE")
+    )
+
+
+def _storage_is_feasible(results: Mapping[str, Result]) -> bool:
+    """План не должен иметь физического переполнения storage ни в одном сценарии."""
+    return _storage_overflow_excess(results) <= 1e-8
+
+
+def _clip_initial_stock_to_storage(case: Case, plan: Plan) -> None:
+    """Обрезать только физически невозможную часть начального запаса."""
+    capacity = case.storage[case.base_storage_id].capacity
+    total = sum(lot.tons for lot in plan.initial_stock)
+    if total <= capacity + 1e-9 or total <= 0:
+        return
+    factor = capacity / total
+    plan.initial_stock = [
+        InitialStockLot(lot.source_id, lot.tons * factor)
+        for lot in plan.initial_stock
+    ]
+
+
+def _repair_storage_overflow(
+    case: Case,
+    seed: Plan,
+    scenarios: Sequence[Scenario],
+    config: OptimizerConfig,
+) -> Tuple[Plan, Dict[str, Result], Tuple[float, ...], int]:
+    """Устранить физическое переполнение storage до локального поиска."""
+    current = copy.deepcopy(seed)
+    _clip_initial_stock_to_storage(case, current)
+    repair_iterations = 0
+    max_repairs = max(1, len(case.years) * len(case.sources) * 4)
+
+    for _ in range(max_repairs):
+        results, score = _evaluate_all(case, current, scenarios)
+        if _storage_is_feasible(results):
+            return current, results, score, repair_iterations
+
+        overflow_by_year: Dict[int, float] = {}
+        for result in results.values():
+            for violation in result.violations:
+                if violation.code != "STORAGE_OVERFLOW" or violation.year is None:
+                    continue
+                overflow_by_year[violation.year] = max(
+                    overflow_by_year.get(violation.year, 0.0),
+                    float(violation.excess or 0.0),
+                )
+
+        if not overflow_by_year:
+            break
+
+        year = max(overflow_by_year, key=overflow_by_year.get)
+
+        candidates = []
+        for sid in case.sources:
+            order = current.order(sid, year)
+            if order <= 1e-9:
+                continue
+            actual_delivery = 0.0
+            for result in results.values():
+                for row in result.yearly:
+                    if row["year"] == year:
+                        actual_delivery = max(
+                            actual_delivery,
+                            float(row["sources"][sid]["actual_delivery"]),
+                        )
+            if actual_delivery > 1e-9:
+                candidates.append((actual_delivery, order, sid))
+
+        if not candidates:
+            break
+
+        _, order, sid = max(candidates, key=lambda item: (item[0], item[1]))
+        source = case.sources[sid]
+        step = max(
+            config.min_step_tons,
+            config.step_fraction_of_capacity * source.capacity,
+        )
+        new_order = max(0.0, order - step)
+
+        trial = copy.deepcopy(current)
+        _set_order(case, trial, sid, year, new_order)
+        if abs(trial.order(sid, year) - order) <= 1e-12:
+            break
+
+        current = trial
+        repair_iterations += 1
+
+    results, score = _evaluate_all(case, current, scenarios)
+    return current, results, score, repair_iterations
+
+
 def _order_variables(case: Case, plan: Plan) -> List[Tuple[str, int]]:
     variables = []
     for sid in case.sources:
@@ -380,9 +483,10 @@ def _local_search(
     config: OptimizerConfig,
 ) -> Tuple[Plan, Dict[str, Result], Tuple[float, ...], int]:
     """Coordinate descent по годовым заказам."""
-    current = copy.deepcopy(seed)
-    results, current_score = _evaluate_all(case, current, scenarios)
-    iterations = 0
+    current, results, current_score, repair_iterations = _repair_storage_overflow(
+        case, seed, scenarios, config
+    )
+    iterations = repair_iterations
 
     for _ in range(config.max_local_search_passes):
         improved = False
@@ -418,6 +522,11 @@ def _local_search(
                 trial_results, trial_score = _evaluate_all(
                     case, trial, scenarios
                 )
+
+                # После достижения физически безопасного состояния
+                # нельзя снова принять кандидат с переполнением storage.
+                if _storage_is_feasible(results) and not _storage_is_feasible(trial_results):
+                    continue
 
                 if trial_score < best_local_score:
                     best_local_plan = trial
@@ -480,6 +589,14 @@ def optimize(
         )
         candidates_checked += 1
         total_iterations += iterations
+
+        # Физически некорректный storage-кандидат не попадает в итоговый набор.
+        if not _storage_is_feasible(results):
+            notes.append(
+                f"Кандидат с инвестициями {option_ids} отклонён: "
+                "осталось переполнение storage."
+            )
+            continue
 
         if best_score is None or score < best_score:
             best_plan = candidate
