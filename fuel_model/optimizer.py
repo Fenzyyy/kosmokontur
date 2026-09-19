@@ -94,6 +94,25 @@ class OptimizationResult:
         return sum(r.kpis["shortage_total"] for r in self.scenario_results.values())
 
 
+def _plan_has_decisions(plan: Plan) -> bool:
+    """Есть ли в Plan реальные решения, а не нулевой UI-шаблон."""
+    if plan.investments:
+        return True
+    if any(
+        float(value) > 1e-9
+        for by_year in plan.orders.values()
+        for value in by_year.values()
+    ):
+        return True
+    if any(
+        float(value) > 1e-9
+        for by_year in plan.reserved.values()
+        for value in by_year.values()
+    ):
+        return True
+    return any(float(lot.tons) > 1e-9 for lot in plan.initial_stock)
+
+
 def _investment_subsets(
     case: Case,
     config: OptimizerConfig,
@@ -1467,6 +1486,7 @@ def optimize(
     candidate_summaries: List[CandidateSummary] = []
 
     fixed_investments = tuple(base_plan.investments) if base_plan.investments else None
+    use_greedy_seed = not _plan_has_decisions(base_plan)
     for option_ids in _investment_subsets(case, config, fixed_investments):
         fixed_decisions = base_plan.investments if fixed_investments is not None else None
         capex_total, capex_through_deadline = _investment_capex(
@@ -1509,7 +1529,7 @@ def optimize(
             )
             continue
 
-        if initial_plan is None:
+        if use_greedy_seed:
             seed = _build_greedy_plan(
                 case,
                 seed,
