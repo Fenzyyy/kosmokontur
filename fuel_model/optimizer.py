@@ -407,6 +407,115 @@ def _reserve_is_feasible(results: Mapping[str, Result]) -> bool:
     )
 
 
+def _repair_service_shortage(
+    case: Case,
+    seed: Plan,
+    scenarios: Sequence[Scenario],
+    config: OptimizerConfig,
+) -> Tuple[Plan, Dict[str, Result], Tuple[float, ...], int]:
+    """Добрать поставки до нулевого дефицита во всех заданных сценариях.
+
+    Это отдельный feasibility-repair: каждый кандидат проверяется полным
+    суточным engine, поэтому увеличение заказа допускается только если
+    одновременно сохраняется физическая ёмкость storage.
+    """
+    current = copy.deepcopy(seed)
+    iterations = 0
+    max_repairs = max(1, len(case.years) * len(case.sources) * 3)
+
+    def year_shortage(results: Mapping[str, Result], year: int) -> float:
+        return sum(
+            row["shortage_total"]
+            for result in results.values()
+            for row in result.yearly
+            if row["year"] == year
+        )
+
+    for _ in range(max_repairs):
+        results, score = _evaluate_all(case, current, scenarios)
+        total_shortage = sum(
+            result.kpis["shortage_total"] for result in results.values()
+        )
+        if total_shortage <= 1e-8:
+            return current, results, score, iterations
+
+        worst_year = max(
+            case.years,
+            key=lambda y: year_shortage(results, y),
+        )
+        current_year_shortage = year_shortage(results, worst_year)
+
+        candidates = []
+        resolved = resolve(case, current)
+
+        for sid, source in case.sources.items():
+            frac = resolved.cal.fraction_available(
+                worst_year, resolved.avail_day[sid]
+            )
+            if frac <= 1e-12:
+                continue
+
+            current_order = current.order(sid, worst_year)
+            max_order = source.capacity * frac
+            room = max(0.0, max_order - current_order)
+            if room <= 1e-9:
+                continue
+
+            # Ищем максимальную storage-safe добавку.
+            safe_hi = room
+            safe_trial = None
+            safe_results = None
+            for _ in range(8):
+                trial = copy.deepcopy(current)
+                _set_order(
+                    case,
+                    trial,
+                    sid,
+                    worst_year,
+                    current_order + safe_hi,
+                )
+                trial_results, trial_score = _evaluate_all(
+                    case, trial, scenarios
+                )
+                if _storage_is_feasible(trial_results):
+                    safe_trial = trial
+                    safe_results = trial_results
+                    break
+                safe_hi *= 0.5
+
+            if safe_trial is None or safe_results is None or safe_hi <= 1e-9:
+                continue
+
+            gain = current_year_shortage - year_shortage(
+                safe_results, worst_year
+            )
+            if gain <= 1e-8:
+                continue
+
+            cost = source.variable_cost + source.reservation_rate
+            candidates.append((
+                gain / safe_hi,
+                gain,
+                -cost,
+                sid,
+                safe_trial,
+                safe_results,
+                trial_score,
+            ))
+
+        if not candidates:
+            return current, results, score, iterations
+
+        _, _, _, _, current, results, score = max(
+            candidates,
+            key=lambda item: (item[0], item[1], item[2], item[3]),
+        )
+        iterations += 1
+
+    results, score = _evaluate_all(case, current, scenarios)
+    return current, results, score, iterations
+
+
 def _set_emergency_reserve(
     case: Case,
     plan: Plan,
@@ -919,7 +1028,15 @@ def _local_search(
     current, results, current_score, reserve_repair_iterations = _repair_reserve(
         case, current, scenarios, config
     )
-    iterations = reserve_iterations + storage_iterations + reserve_repair_iterations
+    current, results, current_score, service_iterations = _repair_service_shortage(
+        case, current, scenarios, config
+    )
+    iterations = (
+        reserve_iterations
+        + storage_iterations
+        + reserve_repair_iterations
+        + service_iterations
+    )
 
     for _ in range(config.max_local_search_passes):
         improved = False
@@ -974,6 +1091,11 @@ def _local_search(
 
         if not improved:
             break
+
+    current, results, current_score, final_service_iterations = _repair_service_shortage(
+        case, current, scenarios, config
+    )
+    iterations += final_service_iterations
 
     return current, results, current_score, iterations
 
@@ -1037,6 +1159,16 @@ def optimize(
             notes.append(
                 f"Кандидат с инвестициями {option_ids} отклонён: "
                 "осталось переполнение storage."
+            )
+            continue
+
+        if any(
+            r.kpis["shortage_total"] > 1e-8
+            for r in results.values()
+        ):
+            notes.append(
+                f"Кандидат с инвестициями {option_ids} отклонён: "
+                "остался фактический дефицит поставок."
             )
             continue
 
