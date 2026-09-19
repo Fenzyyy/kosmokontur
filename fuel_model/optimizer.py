@@ -486,9 +486,7 @@ def _repair_reserve(
                 trial_results, trial_score = _evaluate_all(
                     case, trial, scenarios
                 )
-                if _reserve_is_feasible_for_year(
-                    trial_results, contract_year
-                ) or _storage_is_feasible(trial_results):
+                if _storage_is_feasible(trial_results):
                     current = trial
                     iterations += 1
                     if _reserve_is_feasible(trial_results):
