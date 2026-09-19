@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from backend.api import app, case
+from fuel_model.engine import ENGINE_VERSION
 from fuel_model.investments import build_investment_decision, decision_to_dict
 from fuel_model.optimizer import optimize
 from fuel_model.model import Plan
@@ -17,6 +18,7 @@ def test_health_and_defaults_load_real_case():
     assert health.status_code == 200
     body = health.json()
     assert body["ok"] is True
+    assert body["engine_version"] == ENGINE_VERSION
     assert body["years"] == [2035, 2040]
     assert {s["id"] for s in body["sources"]} == {"A", "B", "C", "D", "E"}
 
@@ -93,3 +95,16 @@ def test_investment_schedule_is_shared_by_api_and_optimizer():
     )
     for option_id, decision in result.plan.investments.items():
         assert decision_to_dict(decision) == api_investments[option_id]["default_schedule"]
+
+
+def test_explicit_investments_are_preserved_by_optimizer():
+    defaults = client.get("/api/defaults").json()
+    schedule = next(x["default_schedule"] for x in defaults["investments"] if x["id"] == "EARTH_NEW")
+    plan = Plan.from_dict(defaults["plan_template"])
+    plan.investments = {"EARTH_NEW": build_investment_decision(case(), "EARTH_NEW")}
+
+    result = optimize(case(), [get("BASE")], initial_plan=plan)
+
+    assert set(result.plan.investments) == {"EARTH_NEW"}
+    assert decision_to_dict(result.plan.investments["EARTH_NEW"]) == schedule
+    assert len(result.candidate_summaries) == 1
