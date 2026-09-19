@@ -1296,17 +1296,6 @@ def optimize(
             )
             continue
 
-        if any(
-            r.kpis["shortage_total"] > 1e-8
-            for r in results.values()
-        ):
-            notes.append(
-                f"Кандидат с инвестициями {option_ids} отклонён: "
-                "остался фактический дефицит поставок. "
-                f"{candidate.notes or ''}"
-            )
-            continue
-
         if not _reserve_is_feasible(results):
             reserve_gaps = []
             for scenario_id, scenario_result in results.items():
