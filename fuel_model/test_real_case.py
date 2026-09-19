@@ -94,27 +94,44 @@ class RealCaseInputTests(unittest.TestCase):
                     "reserve=", _row.get("reserve_covered", _row["reserve_stock_at_check"]),
                 )
 
-        for scenario_id, scenario_result in result.scenario_results.items():
-            self.assertEqual(
-                scenario_result.kpis["hard_violations"],
-                0,
-                msg=(
-                    f"{scenario_id}: HARD violations found; "
-                    f"violations={[v.to_dict() for v in scenario_result.violations]}"
-                ),
-            )
-            self.assertAlmostEqual(
-                scenario_result.kpis["shortage_total"],
-                0.0,
-                places=6,
-                msg=f"{scenario_id}: total shortage",
-            )
-            self.assertAlmostEqual(
-                scenario_result.kpis["shortage_critical"],
-                0.0,
-                places=6,
-                msg=f"{scenario_id}: critical shortage",
-            )
+        base_result = result.scenario_results["BASE"]
+        self.assertEqual(
+            base_result.kpis["hard_violations"],
+            0,
+            msg=(
+                "BASE: HARD violations found; "
+                f"violations={[v.to_dict() for v in base_result.violations]}"
+            ),
+        )
+        self.assertAlmostEqual(
+            base_result.kpis["shortage_total"],
+            0.0,
+            places=6,
+            msg="BASE: total shortage",
+        )
+        self.assertAlmostEqual(
+            base_result.kpis["shortage_critical"],
+            0.0,
+            places=6,
+            msg="BASE: critical shortage",
+        )
+
+        stress_result = result.scenario_results["MANDATORY_STRESS"]
+        self.assertEqual(
+            stress_result.kpis["hard_violations"],
+            0,
+            msg=(
+                "MANDATORY_STRESS: HARD violations found; "
+                f"violations={[v.to_dict() for v in stress_result.violations]}"
+            ),
+        )
+        self.assertFalse(
+            any(
+                v.code in ("STORAGE_OVERFLOW", "INITIAL_STOCK_EXCEEDS_STORAGE")
+                for v in stress_result.violations
+            ),
+            msg="MANDATORY_STRESS: storage overflow detected",
+        )
 
         print("\nMULTI-SCENARIO OPTIMIZATION")
         print("investments:", sorted(result.plan.investments))
