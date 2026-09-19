@@ -510,10 +510,14 @@ def _repair_reserve(
             if safe_results is None or safe_hi <= 1e-9:
                 continue
 
-            # Если даже максимальная storage-safe добавка не достигает
-            # резерва нужного года, этот канал отдельно задачу не решает.
+            # Если один канал не закрывает весь недобор, используем
+            # его максимально допустимую storage-safe добавку и на
+            # следующей итерации доберём остаток другим каналом.
             if not _reserve_is_feasible_for_year(safe_results, year):
-                continue
+                current = trial
+                iterations += 1
+                repaired = True
+                break
 
             lo = 0.0
             hi = safe_hi
