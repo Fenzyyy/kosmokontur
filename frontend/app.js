@@ -21,7 +21,7 @@ function renderDashboard(){let r=lastResult?.scenarios?.[currentScenario];if(!r)
 function chartSvg(el,series,kind){
  const w=760,h=300,p={l:58,r:18,t:22,b:42},iw=w-p.l-p.r,ih=h-p.t-p.b;
  const vals=series.flatMap(s=>s.data.map(Number).filter(Number.isFinite));
- const max=Math.max(...vals,1),min=Math.min(...vals,0);
+ const rawMax=Math.max(...vals,1),min=Math.min(...vals,0);\n const max=rawMax+(rawMax-Math.min(min,0))*0.08;
  const sx=i=>p.l+(series[0].data.length===1?iw/2:iw*i/(series[0].data.length-1));
  const sy=v=>p.t+ih-(v-min)/(max-min||1)*ih;
  const esc=s=>String(s).replaceAll("&","&amp;").replaceAll("<","&lt;");
