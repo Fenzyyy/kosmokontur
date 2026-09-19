@@ -1,0 +1,9 @@
+{
+  "_comments": "TEAM_ASSUMPTION: explicit modelling assumptions; values should be justified in the final report.",
+  "discount_rate": 0.05,
+  "discount_base_year": 2035,
+  "prep_months": 12.0,
+  "lead_time_choice": "max",
+  "reserve_check_after_first_delivery": false,
+  "emergency_used_threshold_t": 0.0
+}
