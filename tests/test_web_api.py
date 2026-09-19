@@ -241,3 +241,52 @@ def test_user_plan_optimizer_returns_same_contract_shape():
     assert set(returned_plan["investments"]) == {"EARTH_NEW"}
     assert "2035" in returned_plan["orders"]["A"]
     assert "2035" in returned_plan["reserved"]["A"]
+
+
+def test_frontier_endpoint_returns_generic_scenario_metrics():
+    defaults = client.get("/api/defaults").json()
+    response = client.post(
+        "/api/frontier",
+        json={
+            "plan": defaults["plan_template"],
+            "scenario_ids": ["BASE", "LOW_DEMAND"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert set(data["scenarios"]) == {"BASE", "LOW_DEMAND"}
+    assert isinstance(data["points"], list)
+    if data["points"]:
+        assert "scenario_metrics" in data["points"][0]
+        assert "BASE" in data["points"][0]["scenario_metrics"]
+
+
+def test_api_rejects_invalid_scenario_and_plan():
+    defaults = client.get("/api/defaults").json()
+
+    bad_scenario = client.post(
+        "/api/calculate",
+        json={"plan": defaults["plan_template"], "scenario_id": "UNKNOWN"},
+    )
+    assert bad_scenario.status_code == 400
+
+    bad_plan = client.post(
+        "/api/calculate",
+        json={
+            "plan": {
+                **defaults["plan_template"],
+                "orders": {"UNKNOWN_SOURCE": {"2035": 1.0}},
+            },
+            "scenario_id": "BASE",
+        },
+    )
+    assert bad_plan.status_code == 400
+
+    bad_scenario_list = client.post(
+        "/api/optimize",
+        json={
+            "plan": defaults["plan_template"],
+            "scenario_ids": [],
+        },
+    )
+    assert bad_scenario_list.status_code == 422
