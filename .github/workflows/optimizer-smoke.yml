@@ -75,3 +75,6 @@ jobs:
 
       - name: Run optimizer unit tests
         run: python -m unittest fuel_model.test_optimizer -v
+
+      - name: Run real case tests
+        run: python -m unittest fuel_model.test_real_case -v
