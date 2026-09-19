@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from .engine import evaluate
+from .investments import build_investment_decision
 from .model import (
     Case,
     InitialStockLot,
@@ -93,48 +94,6 @@ class OptimizationResult:
         return sum(r.kpis["shortage_total"] for r in self.scenario_results.values())
 
 
-def _month_add(year: int, month: int, months: int) -> Tuple[int, int]:
-    """Добавить целое число месяцев к (year, month)."""
-    idx = year * 12 + (month - 1) + months
-    new_year, new_month = divmod(idx, 12)
-    return new_year, new_month + 1
-
-
-def _investment_decision(case: Case, option_id: str) -> Optional[InvestmentDecision]:
-    """Строит самый ранний формально допустимый график CAPEX для опции."""
-    option = case.options[option_id]
-
-    stage_year = option.earliest_stage_year or case.first_year
-    latest_year = option.latest_capex_year or case.last_year
-    if stage_year > latest_year:
-        return None
-
-    stage_year = max(stage_year, case.first_year)
-    stage_dates = tuple((stage_year, 1) for _ in option.stage_amounts)
-    last_stage = stage_dates[-1] if stage_dates else (stage_year, 1)
-
-    build_months = (
-        option.max_build_months
-        if case.assumptions.lead_time_choice == "max"
-        else option.min_build_months
-    )
-    service_year, service_month = _month_add(
-        last_stage[0], last_stage[1], int(round(build_months))
-    )
-    if option.earliest_in_service_year is not None:
-        service_year = max(service_year, option.earliest_in_service_year)
-
-    if service_year < case.first_year:
-        service_year, service_month = case.first_year, 1
-    if service_year > case.last_year:
-        return None
-
-    return InvestmentDecision(
-        stage_dates=stage_dates,
-        in_service=(service_year, service_month),
-    )
-
-
 def _investment_subsets(
     case: Case,
     config: OptimizerConfig,
@@ -165,7 +124,7 @@ def _investment_capex(case: Case, option_ids: Sequence[str]) -> Tuple[float, flo
     for option_id in option_ids:
         option = case.options[option_id]
         total += option.total_capex
-        decision = _investment_decision(case, option_id)
+        decision = build_investment_decision(case, option_id)
         if decision is None:
             continue
         for stage_date, amount in zip(decision.stage_dates, option.stage_amounts):
@@ -203,7 +162,7 @@ def _with_investments(
     plan.investments = {}
 
     for option_id in option_ids:
-        decision = _investment_decision(case, option_id)
+        decision = build_investment_decision(case, option_id)
         if decision is None:
             return None
         plan.investments[option_id] = decision
