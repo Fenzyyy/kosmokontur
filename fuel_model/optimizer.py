@@ -309,7 +309,7 @@ def _build_greedy_plan(
 
         # Небольшой технологический запас компенсирует дискретный
         # суточный/месячный график поставок и пограничное округление.
-        gross_need += 0.5
+        gross_need += 1.0
 
         available = []
         for sid, source in case.sources.items():
