@@ -368,6 +368,20 @@ def _evaluate_all(
 
 
 
+def _reserve_is_feasible_for_year(
+    results: Mapping[str, Result],
+    year: int,
+) -> bool:
+    """Проверить резерв только в одном году."""
+    for result in results.values():
+        for row in result.yearly:
+            if row["year"] != year:
+                continue
+            if row["reserve_stock_at_check"] + 1e-8 < row["reserve_required"]:
+                return False
+    return True
+
+
 def _reserve_is_feasible(results: Mapping[str, Result]) -> bool:
     """Проверить физический 45-дневный резерв во всех сценариях."""
     return not any(
@@ -476,6 +490,7 @@ def _repair_reserve(
 
         repaired = False
         for _, sid, room in source_candidates:
+            current_order = current.order(sid, prev_year)
             lo = 0.0
             hi = room
 
@@ -486,7 +501,10 @@ def _repair_reserve(
 
             # Если даже полный оставшийся ресурс не даёт резерв,
             # пробуем следующий канал.
-            if not _reserve_is_feasible(high_results):
+            if (
+                not _reserve_is_feasible_for_year(high_results, year)
+                or not _storage_is_feasible(high_results)
+            ):
                 continue
 
             # Ищем минимальную добавку, которая делает весь набор сценариев
@@ -503,7 +521,10 @@ def _repair_reserve(
                 )
                 trial_results, _ = _evaluate_all(case, trial, scenarios)
 
-                if _reserve_is_feasible(trial_results) and _storage_is_feasible(trial_results):
+                if (
+                    _reserve_is_feasible_for_year(trial_results, year)
+                    and _storage_is_feasible(trial_results)
+                ):
                     hi = mid
                 else:
                     lo = mid
@@ -512,7 +533,10 @@ def _repair_reserve(
             _set_order(case, trial, sid, prev_year, current_order + hi)
             trial_results, trial_score = _evaluate_all(case, trial, scenarios)
 
-            if _reserve_is_feasible(trial_results) and _storage_is_feasible(trial_results):
+            if (
+                _reserve_is_feasible_for_year(trial_results, year)
+                and _storage_is_feasible(trial_results)
+            ):
                 current = trial
                 iterations += 1
                 repaired = True
