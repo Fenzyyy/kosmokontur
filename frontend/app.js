@@ -21,7 +21,8 @@ function renderDashboard(){let r=lastResult?.scenarios?.[currentScenario];if(!r)
 function chartSvg(el,series,kind){
  const w=760,h=300,p={l:58,r:18,t:22,b:42},iw=w-p.l-p.r,ih=h-p.t-p.b;
  const vals=series.flatMap(s=>s.data.map(Number).filter(Number.isFinite));
- const rawMax=Math.max(...vals,1),min=Math.min(...vals,0);\n const max=rawMax+(rawMax-Math.min(min,0))*0.08;
+ const rawMax=Math.max(...vals,1),min=Math.min(...vals,0);
+ const max=rawMax+(rawMax-Math.min(min,0))*0.08;
  const sx=i=>p.l+(series[0].data.length===1?iw/2:iw*i/(series[0].data.length-1));
  const sy=v=>p.t+ih-(v-min)/(max-min||1)*ih;
  const esc=s=>String(s).replaceAll("&","&amp;").replaceAll("<","&lt;");
@@ -56,6 +57,51 @@ function renderFrontier(){
  svg+='</svg>';el.innerHTML=svg;
  $("frontierTable").innerHTML=pts.length?"<table><thead><tr><th>Инвестиции</th><th>CAPEX</th><th>SL BASE</th><th>SL STRESS</th><th>Shortage</th><th>Status</th></tr></thead><tbody>"+pts.map(p=>"<tr><td>"+(p.selected?"★ ":"")+(p.investments||[]).join(", ")+"</td><td>"+fmt(p.capex_total,0)+"</td><td>"+fmt((p.service_level_base||0)*100,2)+"%</td><td>"+fmt(p.service_level_stress==null?null:p.service_level_stress*100,2)+"%</td><td>"+fmt((p.shortage_base||0)+(p.shortage_stress||0))+"</td><td>"+p.status+"</td></tr>").join("")+"</tbody></table>":"<div class=\"message\">Запустите оптимизацию, чтобы получить frontier.</div>";
 }
+
+function downloadText(filename,text,type){
+ const blob=new Blob([text],{type});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement("a");
+ a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+ URL.revokeObjectURL(url);
+}
+function savePlanFile(){
+ if(!plan){msg("planMessage","План ещё не загружен","bad");return}
+ downloadText((plan.plan_id||"kosmokontur_plan")+".json",JSON.stringify(plan,null,2),"application/json;charset=utf-8");
+ msg("planMessage","План сохранён","good");
+}
+function openPlanFile(file){
+ const reader=new FileReader();
+ reader.onload=()=>{try{loadPlan(JSON.parse(reader.result));msg("planMessage","План открыт","good");view("plan")}catch(e){msg("planMessage","Ошибка плана: "+e.message,"bad")}};
+ reader.onerror=()=>msg("planMessage","Не удалось прочитать файл","bad");
+ reader.readAsText(file,"utf-8");
+}
+function csvCell(v){
+ const s=String(v==null?"":v);
+ return '"'+s.replaceAll('"','""')+'"';
+}
+function exportCsv(){
+ if(!lastResult){msg("planMessage","Сначала выполните расчёт","bad");return}
+ const r=lastResult.scenarios?.[currentScenario];
+ if(!r){msg("planMessage","Нет результата выбранного сценария","bad");return}
+ const lines=[["section","scenario","parameter","value","unit"].map(csvCell).join(",")];
+ const k=r.kpis||{};
+ Object.entries(k).forEach(([key,value])=>lines.push(["kpi",currentScenario,key,value,""].map(csvCell).join(",")));
+ (r.yearly||[]).forEach(row=>{
+   Object.entries(row).forEach(([key,value])=>{
+     const unit=/demand|served|shortage|inventory|reserve/.test(key)?"t":"";
+     lines.push(["yearly",currentScenario,row.year+"."+key,value,unit].map(csvCell).join(","));
+   });
+ });
+ (r.violations||[]).forEach(v=>lines.push(["violation",currentScenario,v.code||"",v.message||"",v.year||""].map(csvCell).join(",")));
+ downloadText("kosmokontur_"+currentScenario.toLowerCase()+"_results.csv",lines.join("\n"),"text/csv;charset=utf-8");
+ msg("planMessage","CSV выгружен","good");
+}
+$("savePlan").onclick=savePlanFile;
+$("openPlan").onclick=()=>$("openPlanInput").click();
+$("openPlanInput").onchange=e=>{if(e.target.files?.[0])openPlanFile(e.target.files[0]);e.target.value=""};
+$("exportCsv").onclick=exportCsv;
+
 $("loadTemplate").onclick=()=>loadPlan(defaults.plan_template);$("optimizeBtn").onclick=optimize;
 $("formatJson").onclick=()=>{try{$("planJson").value=JSON.stringify(JSON.parse($("planJson").value),null,2);msg("planMessage","JSON корректен","good")}catch(e){msg("planMessage","Ошибка JSON: "+e.message,"bad")}};
 $("applyJson").onclick=()=>{try{loadPlan(JSON.parse($("planJson").value));msg("planMessage","JSON применён","good");view("plan")}catch(e){msg("planMessage","Ошибка JSON: "+e.message,"bad")}};
