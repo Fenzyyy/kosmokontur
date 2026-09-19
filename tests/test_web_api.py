@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from backend.api import app, case
 from fuel_model.engine import ENGINE_VERSION
 from fuel_model.investments import build_investment_decision, decision_to_dict
-from fuel_model.optimizer import optimize
+from fuel_model.optimizer import _plan_has_decisions, optimize
 from fuel_model.model import Plan
 from fuel_model.scenarios import get
 
@@ -108,3 +108,12 @@ def test_explicit_investments_are_preserved_by_optimizer():
     assert set(result.plan.investments) == {"EARTH_NEW"}
     assert decision_to_dict(result.plan.investments["EARTH_NEW"]) == schedule
     assert len(result.candidate_summaries) == 1
+
+
+def test_zero_ui_template_is_treated_as_empty_plan():
+    defaults = client.get("/api/defaults").json()
+    template = Plan.from_dict(defaults["plan_template"])
+    assert _plan_has_decisions(template) is False
+
+    template.orders["A"][2035] = 1.0
+    assert _plan_has_decisions(template) is True
