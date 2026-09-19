@@ -82,7 +82,10 @@ class RealCaseInputTests(unittest.TestCase):
             self.assertEqual(
                 scenario_result.kpis["hard_violations"],
                 0,
-                msg=f"{scenario_id}: HARD violations found",
+                msg=(
+                    f"{scenario_id}: HARD violations found; "
+                    f"violations={[v.to_dict() for v in scenario_result.violations]}"
+                ),
             )
             self.assertAlmostEqual(
                 scenario_result.kpis["shortage_total"],
