@@ -558,10 +558,29 @@ def _repair_service_shortage(
         if total_shortage <= 1e-8:
             return current, results, score, iterations
 
-        worst_year = max(
-            case.years,
-            key=lambda y: year_shortage(results, y),
-        )
+        base_result = results.get("BASE")
+        if base_result is not None:
+            base_shortages = {
+                row["year"]: row["shortage_total"]
+                for row in base_result.yearly
+            }
+            worst_base_year = max(
+                base_shortages,
+                key=base_shortages.get,
+            )
+            if base_shortages[worst_base_year] > 1e-8:
+                worst_year = worst_base_year
+            else:
+                worst_year = max(
+                    case.years,
+                    key=lambda y: year_shortage(results, y),
+                )
+        else:
+            worst_year = max(
+                case.years,
+                key=lambda y: year_shortage(results, y),
+            )
+
         current_year_shortage = year_shortage(results, worst_year)
 
         candidates = []
